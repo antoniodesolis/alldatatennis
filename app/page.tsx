@@ -1,25 +1,87 @@
 "use client";
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import type { ATPPlayer } from "./api/rankings/route";
+import type { ATPMatch } from "./api/matches/route";
+
+// Torneos ATP principales (excluir challengers, UTR, futures)
+function isMainATP(tournament: string) {
+  const lower = tournament.toLowerCase();
+  return !lower.includes("challenger") && !lower.includes("chall.") && !lower.includes("chall ")
+    && !lower.includes("utr") && !lower.includes("itf") && !lower.includes("futures")
+    && !lower.includes("miyazaki") && !lower.includes("barletta") && !lower.includes("menorca")
+    && !lower.includes("sao leopoldo") && !lower.includes("san luis") && !lower.includes("pro tennis series");
+}
+
+const SURFACE_ES: Record<string, string> = {
+  clay: "Tierra", hard: "Pista dura", grass: "Hierba",
+  "indoor hard": "Indoor", carpet: "Moqueta", "": "—",
+};
+const SURFACE_COLOR: Record<string, string> = {
+  clay: "#c97d47", hard: "#4a90d9", grass: "#5cb85c",
+  "indoor hard": "#8e44ad", carpet: "#7f8c8d",
+};
 
 const PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='170' viewBox='0 0 140 170'%3E%3Crect width='140' height='170' fill='%230d1318'/%3E%3Ccircle cx='70' cy='60' r='28' fill='%23131a22'/%3E%3Cellipse cx='70' cy='130' rx='40' ry='25' fill='%23131a22'/%3E%3C/svg%3E";
 
-// Datos para las tarjetas de partido (código de jugador → atpCode)
-// Códigos ATP reales (obtenidos de atptour.com/en/rankings/singles 31-03-2026)
-const ATP_CODES: Record<string, string> = {
-  "carlos-alcaraz":    "a0e2",
-  "novak-djokovic":    "d643",
-  "stefanos-tsitsipas":"te51",
-  "hubert-hurkacz":    "hb71",
-  "andrey-rublev":     "re44",
-  "tommy-paul":        "pl56",
-  "ben-shelton":       "s0s1",
-};
-function getPlayerImg(code: string) {
-  const c = ATP_CODES[code];
-  return c
-    ? `https://www.atptour.com/-/media/alias/player-headshot/${c}`
-    : PLACEHOLDER;
+// Genera SVG con iniciales como placeholder
+function initialsPlaceholder(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  const initials = parts.length >= 2
+    ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+    : name.slice(0, 2).toUpperCase();
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='52' height='52' viewBox='0 0 52 52'><rect width='52' height='52' rx='26' fill='%23131a22'/><text x='26' y='33' text-anchor='middle' font-family='sans-serif' font-size='16' font-weight='600' fill='%23c8f135'>${initials}</text></svg>`;
+  return `data:image/svg+xml,${svg}`;
+}
+
+// Extrae apellido de "Alcaraz C." o "Carlos Alcaraz"
+function lastName(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  // Si el último token es una inicial (1-2 chars con punto), el apellido es el primero
+  const last = parts[parts.length - 1];
+  if (/^[A-Z]\.?$/.test(last)) return parts[0].toLowerCase();
+  return last.toLowerCase();
+}
+
+// Componente que resuelve y muestra la foto de un jugador
+function PlayerPhoto({
+  name, slug, rankingMap, size = 52, style,
+}: {
+  name: string;
+  slug: string;
+  rankingMap: Map<string, string>; // lastName → photo URL
+  size?: number;
+  style?: React.CSSProperties;
+}) {
+  const [src, setSrc] = useState<string>(() => {
+    const photo = rankingMap.get(lastName(name));
+    return photo ?? "";
+  });
+  const [tried, setTried] = useState(false);
+
+  // Si no está en rankings, pedir al API
+  useEffect(() => {
+    if (src || tried) return;
+    setTried(true);
+    fetch(`/api/player-photo/${encodeURIComponent(slug)}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d?.photo) setSrc(d.photo); })
+      .catch(() => {});
+  }, [src, tried, slug]);
+
+  const fallback = initialsPlaceholder(name);
+  const imgSrc = src || fallback;
+
+  return (
+    <img
+      src={imgSrc}
+      alt={name}
+      width={size}
+      height={size}
+      referrerPolicy="no-referrer"
+      style={{ borderRadius: "50%", objectFit: "cover", objectPosition: "top", background: "#131a22", flexShrink: 0, ...style }}
+      onError={(e) => { (e.target as HTMLImageElement).src = fallback; }}
+    />
+  );
 }
 
 export default function Home() {
@@ -27,16 +89,42 @@ export default function Home() {
   const [players, setPlayers] = useState<ATPPlayer[]>([]);
   const [rankSource, setRankSource] = useState<"live" | "static" | "">("");
   const [loading, setLoading] = useState(true);
+  const [matches, setMatches] = useState<ATPMatch[]>([]);
+  const [matchesLoading, setMatchesLoading] = useState(true);
+  // Map: lastName(lower) → photo URL — construido desde el ranking top 100
+  const [rankingMap, setRankingMap] = useState<Map<string, string>>(new Map());
+
+  const buildRankingMap = useCallback((ps: ATPPlayer[]) => {
+    const m = new Map<string, string>();
+    for (const p of ps) {
+      // Nombre puede ser "Jannik Sinner" o "Carlos Alcaraz"
+      const parts = p.name.trim().split(/\s+/);
+      const last = parts[parts.length - 1].toLowerCase();
+      m.set(last, p.photo);
+    }
+    setRankingMap(m);
+  }, []);
 
   useEffect(() => {
     fetch("/api/rankings")
       .then((r) => r.json())
       .then((data) => {
-        setPlayers(data.players ?? []);
+        const ps: ATPPlayer[] = data.players ?? [];
+        setPlayers(ps);
         setRankSource(data.source ?? "static");
+        buildRankingMap(ps);
       })
       .catch(() => setPlayers([]))
       .finally(() => setLoading(false));
+
+    fetch("/api/matches")
+      .then((r) => r.json())
+      .then((data) => {
+        const all: ATPMatch[] = data.matches ?? [];
+        setMatches(all.filter((m) => isMainATP(m.tournament)));
+      })
+      .catch(() => setMatches([]))
+      .finally(() => setMatchesLoading(false));
   }, []);
 
   const scroll = (dir: "left" | "right") => {
@@ -44,64 +132,9 @@ export default function Home() {
     carouselRef.current.scrollBy({ left: dir === "left" ? -400 : 400, behavior: "smooth" });
   };
 
-  const matches = [
-    {
-      player1: "C. Alcaraz", player2: "J. Lehecka",
-      tournament: "Mutua Madrid Open", round: "Cuartos de final",
-      surface: "Arcilla", time: "21:00", court: "Pista Central",
-      temp: "18°C", wind: "12 km/h", turn: "Noche",
-      pct1: 68, pct2: 32, flag1: "🇪🇸", flag2: "🇨🇿",
-      img1: getPlayerImg("carlos-alcaraz"),
-      img2: PLACEHOLDER,
-      insights: ["Alcaraz +14% en arcilla nocturna", "Viento favorece al servidor más fuerte", "Lehecka pierde nivel en 3er set"],
-      edge: "alta",
-    },
-    {
-      player1: "N. Djokovic", player2: "S. Tsitsipas",
-      tournament: "Mutua Madrid Open", round: "Cuartos de final",
-      surface: "Arcilla", time: "19:00", court: "Manolo Santana",
-      temp: "21°C", wind: "8 km/h", turn: "Tarde",
-      pct1: 58, pct2: 42, flag1: "🇷🇸", flag2: "🇬🇷",
-      img1: getPlayerImg("novak-djokovic"),
-      img2: getPlayerImg("stefanos-tsitsipas"),
-      insights: ["H2H 7-2 Djokovic en arcilla", "Tsitsipas sube nivel con público a favor", "Djokovic mejor en sesión tarde"],
-      edge: "media",
-    },
-    {
-      player1: "H. Hurkacz", player2: "A. Rublev",
-      tournament: "Tiriac Open", round: "Semifinal",
-      surface: "Arcilla", time: "17:00", court: "Central",
-      temp: "16°C", wind: "20 km/h", turn: "Tarde",
-      pct1: 52, pct2: 48, flag1: "🇵🇱", flag2: "🇷🇺",
-      img1: getPlayerImg("hubert-hurkacz"),
-      img2: getPlayerImg("andrey-rublev"),
-      insights: ["Viento alto penaliza a ambos jugadores", "Rublev rinde mejor en frío", "Partido sin edge claro — datos igualados"],
-      edge: "baja",
-    },
-    {
-      player1: "T. Paul", player2: "B. Shelton",
-      tournament: "Houston Clay Court", round: "Semifinal",
-      surface: "Har-Tru", time: "22:00", court: "Center Court",
-      temp: "24°C", wind: "6 km/h", turn: "Noche",
-      pct1: 54, pct2: 46, flag1: "🇺🇸", flag2: "🇺🇸",
-      img1: getPlayerImg("tommy-paul"),
-      img2: getPlayerImg("ben-shelton"),
-      insights: ["Shelton +18% con público americano", "Paul más consistente en Har-Tru", "Noche favorece el saque de Shelton"],
-      edge: "media",
-    },
-  ];
-
-  const edgeColor: Record<string, string> = { alta: "#c8f135", media: "#f1a535", baja: "rgba(255,255,255,0.3)" };
-  const edgeLabel: Record<string, string> = { alta: "Edge alto", media: "Edge medio", baja: "Sin edge claro" };
-
-  const tickerItems = [
-    "Mutua Madrid Open: Alcaraz vs Lehecka",
-    "Mutua Madrid Open: Djokovic vs Tsitsipas",
-    "Tiriac Open: Hurkacz vs Rublev",
-    "Houston Clay Court: Paul vs Shelton",
-    "Mutua Madrid Open: Zverev vs Fritz",
-    "Tiriac Open: Baez vs Borges",
-  ];
+  const tickerItems = matches.length > 0
+    ? matches.map((m) => `${m.tournament}: ${m.player1} vs ${m.player2}`)
+    : ["Cargando partidos ATP..."];
 
   return (
     <main className="min-h-screen bg-[#080c10] text-white overflow-x-hidden">
@@ -217,7 +250,7 @@ export default function Home() {
                 <div className="fm text-xs" style={{ color: "var(--muted)" }}>No se pudieron cargar los rankings.</div>
               ) : (
                 players.map((p) => (
-                  <div key={p.rank} className="p-card">
+                  <a key={p.rank} href={`/player/${lastName(p.name)}`} className="p-card" style={{ textDecoration: "none", color: "inherit" }}>
                     <img
                       src={p.photo}
                       alt={p.name}
@@ -234,7 +267,7 @@ export default function Home() {
                         <div className="fm text-[10px]" style={{ color: "var(--muted)" }}>{p.points} pts</div>
                       )}
                     </div>
-                  </div>
+                  </a>
                 ))
               )}
             </div>
@@ -250,89 +283,69 @@ export default function Home() {
               <div className="slabel mb-1.5">
                 {new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
               </div>
-              <h2 className="fd text-4xl tracking-wide">ANÁLISIS DE HOY</h2>
+              <h2 className="fd text-4xl tracking-wide">PARTIDOS ATP HOY</h2>
             </div>
             <div className="flex items-center gap-2 fm text-xs" style={{ color: "var(--muted)" }}>
               <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--acid)" }} />
-              Actualizado automáticamente
+              {matchesLoading ? "Cargando..." : `${matches.length} partidos · ATP singles`}
             </div>
           </div>
 
-          <div className="flex flex-col gap-4">
-            {matches.map((m, i) => (
-              <div key={i} className="match-card">
-                <div className="flex flex-wrap">
-                  <div className="flex-1 p-6 min-w-[280px]">
-                    <div className="flex items-center gap-2 mb-5">
-                      <span className="tag">{m.surface}</span>
-                      <span className="tag tag-g">{m.tournament}</span>
-                      <span className="tag tag-g">{m.round}</span>
-                      <span className="ml-auto fm text-xs" style={{ color: "var(--muted)" }}>{m.time} · {m.turn}</span>
-                    </div>
-                    <div className="flex items-center gap-4 mb-3">
-                      <img src={m.img1} alt={m.player1} className="avatar" referrerPolicy="no-referrer"
-                        onError={(e) => { (e.target as HTMLImageElement).src = PLACEHOLDER; }} />
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1.5">
-                          <span>{m.flag1}</span>
-                          <span className="fb font-semibold text-lg">{m.player1}</span>
-                        </div>
-                        <div className="bar-track"><div className="bar-fill" style={{ width: `${m.pct1}%` }} /></div>
+          {matchesLoading ? (
+            <div className="flex flex-col gap-3">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="rounded-2xl h-24 p-card-skeleton" />
+              ))}
+            </div>
+          ) : matches.length === 0 ? (
+            <div className="fm text-sm" style={{ color: "var(--muted)" }}>No hay partidos ATP programados hoy.</div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {matches.map((m) => {
+                const surfColor = SURFACE_COLOR[m.surface] ?? "rgba(255,255,255,0.2)";
+                const surfLabel = SURFACE_ES[m.surface] ?? m.surface;
+                const isFinished = m.status === "finished";
+                const isLive = m.status === "live";
+                return (
+                  <div key={m.id} className="match-card" style={{ opacity: isFinished ? 0.6 : 1 }}>
+                    <div className="p-5 flex flex-wrap items-center gap-4">
+
+                      {/* Hora + estado */}
+                      <div className="flex flex-col items-center" style={{ minWidth: 48 }}>
+                        <span className="fd text-2xl" style={{ color: isLive ? "#c8f135" : isFinished ? "var(--muted)" : "white", lineHeight: 1 }}>
+                          {m.time || "—"}
+                        </span>
+                        {isLive && <span className="fm text-[9px] tracking-widest" style={{ color: "#c8f135" }}>LIVE</span>}
+                        {isFinished && <span className="fm text-[9px] tracking-widest" style={{ color: "var(--muted)" }}>FIN</span>}
                       </div>
-                      <span className="pct" style={{ color: "var(--acid)" }}>{m.pct1}%</span>
-                    </div>
-                    <div className="flex items-center gap-3 mb-3 pl-[68px]">
-                      <div className="h-px flex-1" style={{ background: "var(--border)" }} />
-                      <span className="fm text-xs" style={{ color: "var(--muted)" }}>VS</span>
-                      <div className="h-px flex-1" style={{ background: "var(--border)" }} />
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <img src={m.img2} alt={m.player2} className="avatar" style={{ opacity: 0.6 }} referrerPolicy="no-referrer"
-                        onError={(e) => { (e.target as HTMLImageElement).src = PLACEHOLDER; }} />
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1.5">
-                          <span>{m.flag2}</span>
-                          <span className="fb text-lg" style={{ color: "rgba(255,255,255,0.55)" }}>{m.player2}</span>
-                        </div>
-                        <div className="bar-track"><div className="bar-dim" style={{ width: `${m.pct2}%` }} /></div>
+
+                      {/* Jugadores */}
+                      <a href={`/player/${m.player1Slug}`} style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit", minWidth: 0 }}>
+                        <PlayerPhoto name={m.player1} slug={m.player1Slug} rankingMap={rankingMap} size={52} />
+                        <div className="fb font-semibold text-base leading-tight">{m.player1}</div>
+                      </a>
+                      <div className="fm text-[10px]" style={{ color: "var(--muted)", flexShrink: 0 }}>VS</div>
+                      <a href={`/player/${m.player2Slug}`} style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit", minWidth: 0 }}>
+                        <PlayerPhoto name={m.player2} slug={m.player2Slug} rankingMap={rankingMap} size={52} style={{ opacity: 0.75 }} />
+                        <div className="fb font-semibold text-base leading-tight" style={{ color: "rgba(255,255,255,0.6)" }}>{m.player2}</div>
+                      </a>
+
+                      {/* Torneo + ronda + superficie */}
+                      <div className="flex flex-wrap gap-2 items-center ml-auto">
+                        <span className="tag tag-g">{m.tournament}</span>
+                        {m.round && <span className="tag tag-g">{m.round}</span>}
+                        <span className="tag" style={{
+                          background: `${surfColor}22`,
+                          color: surfColor,
+                          borderColor: `${surfColor}44`,
+                        }}>{surfLabel}</span>
                       </div>
-                      <span className="pct" style={{ color: "rgba(255,255,255,0.28)" }}>{m.pct2}%</span>
                     </div>
                   </div>
-                  <div className="p-6 flex flex-col gap-4 border-l min-w-[230px]"
-                    style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.015)" }}>
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full" style={{ background: edgeColor[m.edge] }} />
-                      <span className="fm text-xs uppercase tracking-widest" style={{ color: edgeColor[m.edge] }}>{edgeLabel[m.edge]}</span>
-                    </div>
-                    <div>
-                      <div className="slabel mb-2">Condiciones</div>
-                      <div className="flex flex-wrap gap-1.5">
-                        <span className="tag tag-g">{m.temp}</span>
-                        <span className="tag tag-g">💨 {m.wind}</span>
-                        <span className="tag tag-g">{m.court}</span>
-                      </div>
-                    </div>
-                    <div>
-                      <div className="slabel mb-2">Patrones detectados</div>
-                      <div className="flex flex-col gap-2">
-                        {m.insights.map((ins, j) => (
-                          <div key={j} className="flex items-start gap-2">
-                            <div className="insight-dot" />
-                            <span className="fb text-xs leading-snug" style={{ color: "rgba(255,255,255,0.6)" }}>{ins}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <button className="fm text-xs uppercase tracking-widest w-full py-2.5 rounded-lg text-center transition-all hover:opacity-80 mt-auto"
-                      style={{ background: "var(--acid-dim)", color: "var(--acid)", border: "1px solid rgba(200,241,53,0.2)" }}>
-                      Análisis completo →
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </section>
 
