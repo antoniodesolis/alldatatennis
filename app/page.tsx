@@ -17,7 +17,9 @@ const ATP_CODES: Record<string, string> = {
 };
 function getPlayerImg(code: string) {
   const c = ATP_CODES[code];
-  return c ? `/api/photo/${c}` : PLACEHOLDER;
+  return c
+    ? `https://www.atptour.com/-/media/alias/player-headshot/${c}`
+    : PLACEHOLDER;
 }
 
 export default function Home() {
@@ -219,6 +221,7 @@ export default function Home() {
                     <img
                       src={p.photo}
                       alt={p.name}
+                      referrerPolicy="no-referrer"
                       onError={(e) => { (e.target as HTMLImageElement).src = PLACEHOLDER; }}
                     />
                     <div className="p-3">
@@ -267,7 +270,7 @@ export default function Home() {
                       <span className="ml-auto fm text-xs" style={{ color: "var(--muted)" }}>{m.time} · {m.turn}</span>
                     </div>
                     <div className="flex items-center gap-4 mb-3">
-                      <img src={m.img1} alt={m.player1} className="avatar"
+                      <img src={m.img1} alt={m.player1} className="avatar" referrerPolicy="no-referrer"
                         onError={(e) => { (e.target as HTMLImageElement).src = PLACEHOLDER; }} />
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1.5">
@@ -284,7 +287,7 @@ export default function Home() {
                       <div className="h-px flex-1" style={{ background: "var(--border)" }} />
                     </div>
                     <div className="flex items-center gap-4">
-                      <img src={m.img2} alt={m.player2} className="avatar" style={{ opacity: 0.6 }}
+                      <img src={m.img2} alt={m.player2} className="avatar" style={{ opacity: 0.6 }} referrerPolicy="no-referrer"
                         onError={(e) => { (e.target as HTMLImageElement).src = PLACEHOLDER; }} />
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1.5">

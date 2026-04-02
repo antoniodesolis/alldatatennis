@@ -30,6 +30,7 @@ export async function GET(
     });
 
     if (!res.ok || !res.body) {
+      console.warn(`[photo] ATP ${res.status} for code=${code}`);
       return new Response(null, { status: 404 });
     }
 
@@ -41,7 +42,8 @@ export async function GET(
         "Cache-Control": "public, max-age=86400", // 24h
       },
     });
-  } catch {
+  } catch (err) {
+    console.error(`[photo] fetch error for code=${code}:`, (err as Error).message);
     return new Response(null, { status: 502 });
   }
 }
