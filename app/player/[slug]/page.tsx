@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import type { PlayerPatterns } from "../../../lib/analytics/patterns";
+import type { PlayerPatterns, SplitStat } from "../../../lib/analytics/patterns";
 
 function formatName(slug: string): string {
   return slug.split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
@@ -294,8 +294,8 @@ export default function PlayerPage() {
                   <div className="fb font-semibold text-base">Servicio</div>
                 </div>
                 <StatBar label="1er saque %" value={all?.firstServePct} max={1} format={(v) => pct(v)} />
-                <StatBar label="Puntos ganados con 1er saque" value={all?.firstServeWonPct} max={1} format={(v) => pct(v)} />
-                <StatBar label="Puntos ganados con 2do saque" value={all?.secondServeWonPct} max={1} format={(v) => pct(v)} />
+                <StatBar label="Pts ganados con 1er saque" value={all?.firstServeWonPct} max={1} format={(v) => pct(v)} />
+                <StatBar label="Pts ganados con 2do saque" value={all?.secondServeWonPct} max={1} format={(v) => pct(v)} />
                 <StatBar label="Break points salvados" value={all?.bpSavePct} max={1} format={(v) => pct(v)} />
                 <StatBar label="Aces / partido" value={all?.avgAces} max={20} format={(v) => v.toFixed(1)} />
                 <StatBar label="Dobles faltas / partido" value={all?.avgDoubleFaults} max={10} format={(v) => v.toFixed(1)} />
@@ -313,11 +313,11 @@ export default function PlayerPage() {
                   </div>
                 )}
                 <StatBar label="Win rate general" value={all?.winRate} max={1} format={(v) => pct(v)} />
-                {all?.avgWinners !== null && (
-                  <StatBar label="Winners / partido" value={all?.avgWinners} max={40} format={(v) => v.toFixed(1)} />
+                {all?.avgWinners != null && (
+                  <StatBar label="Winners / partido" value={all.avgWinners} max={40} format={(v) => v.toFixed(1)} />
                 )}
-                {all?.avgUnforced !== null && (
-                  <StatBar label="No forzados / partido" value={all?.avgUnforced} max={40} format={(v) => v.toFixed(1)} />
+                {all?.avgUnforced != null && (
+                  <StatBar label="No forzados / partido" value={all.avgUnforced} max={40} format={(v) => v.toFixed(1)} />
                 )}
                 <div className="fb text-xs mt-3" style={{ color: "var(--muted)" }}>
                   Basado en {all?.matchesUsed} partidos · {all?.wins}V {all?.losses}D
@@ -327,7 +327,7 @@ export default function PlayerPage() {
               {/* Por superficie */}
               <div className="card">
                 <div className="flex items-center gap-2 mb-5">
-                  <span style={{ fontSize: 20 }}>⚔️</span>
+                  <span style={{ fontSize: 20 }}>🏟️</span>
                   <div className="fb font-semibold text-base">Rendimiento por superficie</div>
                 </div>
                 {surfaceBlocks.map(({ label, surface, data }) => {
@@ -340,33 +340,145 @@ export default function PlayerPage() {
                       <div style={{ flex: 1 }}>
                         <div className="flex items-center justify-between mb-1">
                           <span className="fb text-xs" style={{ color: "var(--muted)" }}>{label}</span>
-                          <span className="fm text-xs" style={{ color: wr !== null ? "white" : "var(--muted)" }}>
-                            {wr !== null ? pct(wr) : "—"} {m > 0 ? `(${m}p)` : ""}
+                          <span className="fm text-xs" style={{ color: wr != null ? "white" : "var(--muted)" }}>
+                            {wr != null ? pct(wr) : "—"} {m > 0 ? `(${m}p)` : ""}
                           </span>
                         </div>
                         <div style={{ background: "rgba(255,255,255,0.07)", borderRadius: 999, height: 4 }}>
-                          <div style={{ width: (wr != null) ? `${wr * 100}%` : "0%", height: "100%", borderRadius: 999, background: color, opacity: 0.8, transition: "width 0.6s ease" }} />
+                          <div style={{ width: wr != null ? `${wr * 100}%` : "0%", height: "100%", borderRadius: 999, background: color, opacity: 0.8, transition: "width 0.6s ease" }} />
                         </div>
                       </div>
                     </div>
                   );
                 })}
-                {activeSurface && Object.entries(activeSurface).length === 0 && (
-                  <p className="fb text-sm" style={{ color: "var(--muted)" }}>Sin desglose por superficie disponible.</p>
-                )}
               </div>
 
-              {/* Psicología — BP y presión */}
+              {/* Duración del partido */}
               <div className="card">
                 <div className="flex items-center gap-2 mb-5">
+                  <span style={{ fontSize: 20 }}>⏱️</span>
+                  <div>
+                    <div className="fb font-semibold text-base">Duración del partido</div>
+                    <div className="fb text-xs" style={{ color: "var(--muted)" }}>corto &lt;80 min · medio 80-150 · largo &gt;150</div>
+                  </div>
+                </div>
+                {(["short","medium","long"] as const).map((cat) => {
+                  const labels = { short: "Corto (<80 min)", medium: "Medio (80-150 min)", long: "Largo (>150 min)" };
+                  const colors = { short: "#c8f135", medium: "#4a90d9", long: "#c97d47" };
+                  const split: SplitStat | undefined = all?.durationSplits?.[cat];
+                  const wr = split?.winRate;
+                  const m  = split?.matches ?? 0;
+                  return (
+                    <div key={cat} className="flex items-center gap-3 mb-4">
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: colors[cat], flexShrink: 0 }} />
+                      <div style={{ flex: 1 }}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="fb text-xs" style={{ color: "var(--muted)" }}>{labels[cat]}</span>
+                          <span className="fm text-xs" style={{ color: wr != null ? "white" : "var(--muted)" }}>
+                            {wr != null ? pct(wr) : "—"} {m > 0 ? `(${m}p)` : ""}
+                          </span>
+                        </div>
+                        <div style={{ background: "rgba(255,255,255,0.07)", borderRadius: 999, height: 4 }}>
+                          <div style={{ width: wr != null ? `${wr * 100}%` : "0%", height: "100%", borderRadius: 999, background: colors[cat], opacity: 0.75, transition: "width 0.6s ease" }} />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div className="fb text-xs mt-1" style={{ color: "var(--muted)" }}>
+                  Indica si el jugador rinde mejor en partidos rápidos o en maratones.
+                </div>
+              </div>
+
+              {/* Hora del partido */}
+              <div className="card">
+                <div className="flex items-center gap-2 mb-5">
+                  <span style={{ fontSize: 20 }}>🌙</span>
+                  <div>
+                    <div className="fb font-semibold text-base">Hora del partido</div>
+                    <div className="fb text-xs" style={{ color: "var(--muted)" }}>día &lt;17h · tarde 17-21h · noche &gt;21h</div>
+                  </div>
+                </div>
+                {(["day","evening","night"] as const).map((tod) => {
+                  const labels = { day: "Día (<17:00)", evening: "Tarde (17-21h)", night: "Noche (>21h)" };
+                  const colors = { day: "#f5c518", evening: "#e8834a", night: "#7b68ee" };
+                  const split: SplitStat | undefined = all?.timeOfDaySplits?.[tod];
+                  const wr = split?.winRate;
+                  const m  = split?.matches ?? 0;
+                  return (
+                    <div key={tod} className="flex items-center gap-3 mb-4">
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: colors[tod], flexShrink: 0 }} />
+                      <div style={{ flex: 1 }}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="fb text-xs" style={{ color: "var(--muted)" }}>{labels[tod]}</span>
+                          <span className="fm text-xs" style={{ color: wr != null ? "white" : "var(--muted)" }}>
+                            {wr != null ? pct(wr) : "—"} {m > 0 ? `(${m}p)` : ""}
+                          </span>
+                        </div>
+                        <div style={{ background: "rgba(255,255,255,0.07)", borderRadius: 999, height: 4 }}>
+                          <div style={{ width: wr != null ? `${wr * 100}%` : "0%", height: "100%", borderRadius: 999, background: colors[tod], opacity: 0.75, transition: "width 0.6s ease" }} />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div className="fb text-xs mt-1" style={{ color: "var(--muted)" }}>
+                  Disponible para partidos con hora registrada. Histórico Sackmann sin hora.
+                </div>
+              </div>
+
+              {/* Estilo del rival */}
+              <div className="card md:col-span-2">
+                <div className="flex items-center gap-2 mb-5">
                   <span style={{ fontSize: 20 }}>🧠</span>
+                  <div>
+                    <div className="fb font-semibold text-base">Win rate por estilo de rival</div>
+                    <div className="fb text-xs" style={{ color: "var(--muted)" }}>No es lo mismo ganar a Baez (defensor) que a Bublik (big server)</div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {([
+                    { key: "big-server",           label: "Big server",           color: "#e74c3c", icon: "💥" },
+                    { key: "aggressive-baseliner", label: "Baseliner agresivo",   color: "#e67e22", icon: "🔥" },
+                    { key: "all-court",            label: "All-court",            color: "#c8f135", icon: "⚡" },
+                    { key: "counter-puncher",      label: "Defensor / retriever", color: "#3498db", icon: "🛡️" },
+                    { key: "baseliner",            label: "Baseliner estándar",   color: "#95a5a6", icon: "🎾" },
+                  ] as const).map(({ key, label, color, icon }) => {
+                    const split: SplitStat | undefined = all?.opponentStyleSplits?.[key];
+                    const wr = split?.winRate;
+                    const m  = split?.matches ?? 0;
+                    return (
+                      <div key={key} style={{ background: "var(--bg3)", borderRadius: 12, padding: "14px 16px", border: "1px solid var(--border)" }}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <span style={{ fontSize: 14 }}>{icon}</span>
+                          <span className="fb text-xs font-semibold">{label}</span>
+                        </div>
+                        <div className="fd" style={{ fontSize: 28, color: wr != null ? color : "var(--muted)", lineHeight: 1 }}>
+                          {wr != null ? pct(wr) : "—"}
+                        </div>
+                        <div className="fb text-xs mt-1" style={{ color: "var(--muted)" }}>
+                          {m > 0 ? `${m} partidos` : "sin datos"}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="fb text-xs mt-4" style={{ color: "var(--muted)", lineHeight: 1.65 }}>
+                  Clasificación basada en el estilo declarado de cada jugador. Se actualiza con cada nuevo partido registrado.
+                </div>
+              </div>
+
+              {/* Presión y eficiencia */}
+              <div className="card">
+                <div className="flex items-center gap-2 mb-5">
+                  <span style={{ fontSize: 20 }}>⚔️</span>
                   <div className="fb font-semibold text-base">Presión y eficiencia</div>
                 </div>
                 <StatBar label="Break points salvados %" value={all?.bpSavePct} max={1} format={(v) => pct(v)} />
                 {all != null && all.avgWinners != null && all.avgUnforced != null && all.avgUnforced > 0 && (
                   <div style={{ marginBottom: 10 }}>
                     <div className="flex items-center justify-between mb-1">
-                      <span className="fb text-xs" style={{ color: "var(--muted)" }}>Ratio winners/nf</span>
+                      <span className="fb text-xs" style={{ color: "var(--muted)" }}>Ratio winners/no forzados</span>
                       <span className="fm text-xs" style={{ color: "white" }}>
                         {num(all.avgWinners / all.avgUnforced, 2)}
                       </span>
@@ -377,7 +489,7 @@ export default function PlayerPage() {
                   </div>
                 )}
                 <div className="fb text-xs mt-4 leading-relaxed" style={{ color: "var(--muted)" }}>
-                  Análisis H2H disponible próximamente. Los datos de presión se calcularán con el historial completo de partidos.
+                  H2H directos disponibles próximamente cuando se acumulen suficientes partidos en DB.
                 </div>
               </div>
 

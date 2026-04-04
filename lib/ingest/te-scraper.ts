@@ -6,6 +6,7 @@
 
 import { upsertMatchStat, upsertPlayer, isMatchProcessed, markMatchProcessed } from "../db/queries";
 import { normalizeSurface, normalizeRound } from "../analytics/player-resolver";
+import { getPlayerStyle, classifyTimeOfDay } from "../analytics/player-styles";
 import type { ATPMatch } from "../../app/api/matches/route";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36";
@@ -88,6 +89,10 @@ export async function scrapeFinishedMatches(matches: ATPMatch[]): Promise<{ scra
       const surface = detail.surface ?? m.surface ?? null;
       const round   = detail.round ?? m.round ?? null;
 
+      // Hora y franja horaria
+      const matchTime  = m.time ?? null;
+      const timeOfDay  = classifyTimeOfDay(matchTime);
+
       // Registrar jugadores
       upsertPlayer({ te_slug: m.player1Slug, atp_code: null, full_name: m.player1, sackmann_id: null });
       upsertPlayer({ te_slug: m.player2Slug, atp_code: null, full_name: m.player2, sackmann_id: null });
@@ -100,6 +105,8 @@ export async function scrapeFinishedMatches(matches: ATPMatch[]): Promise<{ scra
         round,
         score: detail.score,
         duration_min: detail.durationMin,
+        match_time: matchTime,
+        time_of_day: timeOfDay === "unknown" ? null : timeOfDay,
         aces: null, double_faults: null, serve_pts: null,
         first_in: null, first_won: null, second_won: null,
         serve_games: null, bp_saved: null, bp_faced: null,
@@ -107,8 +114,20 @@ export async function scrapeFinishedMatches(matches: ATPMatch[]): Promise<{ scra
         source: "te_scrape",
       };
 
-      upsertMatchStat({ ...base, te_slug: m.player1Slug, opponent_slug: m.player2Slug, result: null });
-      upsertMatchStat({ ...base, te_slug: m.player2Slug, opponent_slug: m.player1Slug, result: null });
+      upsertMatchStat({
+        ...base,
+        te_slug: m.player1Slug,
+        opponent_slug: m.player2Slug,
+        opponent_style: getPlayerStyle(m.player2Slug),
+        result: null,
+      });
+      upsertMatchStat({
+        ...base,
+        te_slug: m.player2Slug,
+        opponent_slug: m.player1Slug,
+        opponent_style: getPlayerStyle(m.player1Slug),
+        result: null,
+      });
 
       markMatchProcessed(teMatchId, "stats_found");
       scraped++;

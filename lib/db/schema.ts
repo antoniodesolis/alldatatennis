@@ -52,7 +52,19 @@ export function runMigrations() {
 
     CREATE INDEX IF NOT EXISTS idx_pms_slug_surface
       ON player_match_stats(te_slug, surface, match_date DESC);
+  `);
 
+  // Migraciones aditivas — ADD COLUMN falla si ya existe, lo ignoramos
+  const addCols = [
+    "ALTER TABLE player_match_stats ADD COLUMN match_time      TEXT",
+    "ALTER TABLE player_match_stats ADD COLUMN time_of_day     TEXT",
+    "ALTER TABLE player_match_stats ADD COLUMN opponent_style  TEXT",
+  ];
+  for (const sql of addCols) {
+    try { db.exec(sql); } catch { /* columna ya existe */ }
+  }
+
+  db.exec(`
     -- Control de partidos ya procesados
     CREATE TABLE IF NOT EXISTS processed_matches (
       te_match_id  TEXT PRIMARY KEY,

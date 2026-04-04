@@ -9,6 +9,7 @@
 
 import { upsertMatchStat, upsertPlayer, markMatchProcessed } from "../db/queries";
 import { nameToSlug, normalizeSurface, normalizeRound } from "../analytics/player-resolver";
+import { getPlayerStyle } from "../analytics/player-styles";
 
 const UA = "Mozilla/5.0 (compatible; AllDataTennis/1.0)";
 
@@ -103,7 +104,12 @@ export async function ingestSackmannYear(year: number): Promise<{ inserted: numb
 
     if (!winnerSlug && !loserSlug) { skipped++; continue; }
 
-    const baseMatch = { te_match_id: teMatchId, match_date: matchDate, tournament, surface, round, score, duration_min: minutes ? Math.round(minutes) : null, source: "sackmann_csv" };
+    const baseMatch = {
+      te_match_id: teMatchId, match_date: matchDate, tournament, surface, round, score,
+      duration_min: minutes ? Math.round(minutes) : null,
+      match_time: null, time_of_day: null,
+      source: "sackmann_csv",
+    };
 
     // Fila del ganador
     if (winnerSlug) {
@@ -111,6 +117,7 @@ export async function ingestSackmannYear(year: number): Promise<{ inserted: numb
         ...baseMatch,
         te_slug: winnerSlug,
         opponent_slug: loserSlug,
+        opponent_style: loserSlug ? getPlayerStyle(loserSlug) : null,
         result: "W",
         aces: n(row[idx("w_ace")]),
         double_faults: n(row[idx("w_df")]),
@@ -134,6 +141,7 @@ export async function ingestSackmannYear(year: number): Promise<{ inserted: numb
         ...baseMatch,
         te_slug: loserSlug,
         opponent_slug: winnerSlug,
+        opponent_style: winnerSlug ? getPlayerStyle(winnerSlug) : null,
         result: "L",
         aces: n(row[idx("l_ace")]),
         double_faults: n(row[idx("l_df")]),
@@ -228,6 +236,9 @@ export async function ingestChartingCSV(): Promise<{ enriched: number }> {
       return_pts_won: n(row[idx("retPtsWon")] ?? row[idx("return_pts_won")] ?? ""),
       winners,
       unforced_errors: unforced,
+      match_time: null,
+      time_of_day: null,
+      opponent_style: null,
       source: "charting_csv",
     });
     enriched++;

@@ -31,6 +31,9 @@ export interface MatchStatRow {
   return_pts_won: number | null;
   winners: number | null;
   unforced_errors: number | null;
+  match_time: string | null;      // "21:00" hora local del torneo
+  time_of_day: string | null;     // "day" | "evening" | "night"
+  opponent_style: string | null;  // "big-server" | "aggressive-baseliner" | …
   source: string | null;
 }
 
@@ -80,31 +83,34 @@ export function upsertMatchStat(row: Omit<MatchStatRow, "id">) {
        opponent_slug, result, score, duration_min,
        aces, double_faults, serve_pts, first_in, first_won, second_won,
        serve_games, bp_saved, bp_faced, return_pts_won,
-       winners, unforced_errors, source)
+       winners, unforced_errors, match_time, time_of_day, opponent_style, source)
     VALUES
       (@te_slug, @te_match_id, @match_date, @tournament, @surface, @round,
        @opponent_slug, @result, @score, @duration_min,
        @aces, @double_faults, @serve_pts, @first_in, @first_won, @second_won,
        @serve_games, @bp_saved, @bp_faced, @return_pts_won,
-       @winners, @unforced_errors, @source)
+       @winners, @unforced_errors, @match_time, @time_of_day, @opponent_style, @source)
     ON CONFLICT(te_slug, te_match_id) DO UPDATE SET
-      surface       = COALESCE(excluded.surface, surface),
-      round         = COALESCE(excluded.round, round),
-      score         = COALESCE(excluded.score, score),
-      duration_min  = COALESCE(excluded.duration_min, duration_min),
-      aces          = COALESCE(excluded.aces, aces),
-      double_faults = COALESCE(excluded.double_faults, double_faults),
-      serve_pts     = COALESCE(excluded.serve_pts, serve_pts),
-      first_in      = COALESCE(excluded.first_in, first_in),
-      first_won     = COALESCE(excluded.first_won, first_won),
-      second_won    = COALESCE(excluded.second_won, second_won),
-      serve_games   = COALESCE(excluded.serve_games, serve_games),
-      bp_saved      = COALESCE(excluded.bp_saved, bp_saved),
-      bp_faced      = COALESCE(excluded.bp_faced, bp_faced),
-      return_pts_won = COALESCE(excluded.return_pts_won, return_pts_won),
-      winners       = COALESCE(excluded.winners, winners),
+      surface         = COALESCE(excluded.surface, surface),
+      round           = COALESCE(excluded.round, round),
+      score           = COALESCE(excluded.score, score),
+      duration_min    = COALESCE(excluded.duration_min, duration_min),
+      aces            = COALESCE(excluded.aces, aces),
+      double_faults   = COALESCE(excluded.double_faults, double_faults),
+      serve_pts       = COALESCE(excluded.serve_pts, serve_pts),
+      first_in        = COALESCE(excluded.first_in, first_in),
+      first_won       = COALESCE(excluded.first_won, first_won),
+      second_won      = COALESCE(excluded.second_won, second_won),
+      serve_games     = COALESCE(excluded.serve_games, serve_games),
+      bp_saved        = COALESCE(excluded.bp_saved, bp_saved),
+      bp_faced        = COALESCE(excluded.bp_faced, bp_faced),
+      return_pts_won  = COALESCE(excluded.return_pts_won, return_pts_won),
+      winners         = COALESCE(excluded.winners, winners),
       unforced_errors = COALESCE(excluded.unforced_errors, unforced_errors),
-      source        = COALESCE(excluded.source, source)
+      match_time      = COALESCE(excluded.match_time, match_time),
+      time_of_day     = COALESCE(excluded.time_of_day, time_of_day),
+      opponent_style  = COALESCE(excluded.opponent_style, opponent_style),
+      source          = COALESCE(excluded.source, source)
   `).run(row);
 }
 
