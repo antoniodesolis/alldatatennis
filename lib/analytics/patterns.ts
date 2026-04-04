@@ -135,31 +135,48 @@ export interface PlayerPatterns {
 // ── Cálculo principal ─────────────────────────────────────
 
 function computeFromRows(rows: MatchStatRow[], teSlug: string, surface: string, windowN: number): PlayerPatterns {
-  const limited = rows.slice(0, windowN);
-  const wins    = limited.filter((r) => r.result === "W").length;
-  const losses  = limited.filter((r) => r.result === "L").length;
-  const total   = wins + losses;
+  /**
+   * Los datos vienen de dos fuentes con columnas distintas:
+   *   sackmann_csv  → result, surface, aces, serve stats, opponent_rank, tourney_level, score, etc.
+   *   charting_csv  → winners, unforced_errors  (result y surface son NULL)
+   *
+   * Separamos en tres ventanas para no mezclar nulls:
+   *   resultRows  → filas con result != null  → win rate, splits por superficie/ronda/nivel/etc.
+   *   serveRows   → filas con first_in != null → estadísticas de servicio
+   *   shotRows    → filas con winners != null  → winners / unforced
+   */
+  const resultRows = rows.filter((r) => r.result !== null).slice(0, windowN);
+  const serveRows  = rows.filter((r) => r.first_in !== null || r.aces !== null).slice(0, windowN);
+  const shotRows   = rows.filter((r) => r.winners !== null).slice(0, windowN);
 
-  const recentForm = limited.slice(0, 10).map((r) => r.result ?? "?");
+  const wins   = resultRows.filter((r) => r.result === "W").length;
+  const losses = resultRows.filter((r) => r.result === "L").length;
+  const total  = wins + losses;
+
+  // Forma reciente desde resultRows
+  const recentForm = resultRows.slice(0, 10).map((r) => r.result ?? "?");
 
   // ── Surface splits (solo en consulta "all") ───────────────
   let surfaceSplits: Record<string, SplitStat> | undefined;
   if (surface === "") {
     const byS: Record<string, MatchStatRow[]> = {};
-    for (const r of limited) {
+    for (const r of resultRows) {
       const s = r.surface ?? "unknown";
+      if (s === "unknown") continue;  // ignorar filas sin superficie
       if (!byS[s]) byS[s] = [];
       byS[s].push(r);
     }
-    surfaceSplits = {};
-    for (const [s, rs] of Object.entries(byS)) {
-      surfaceSplits[s] = winRateSplit(rs);
+    if (Object.keys(byS).length > 0) {
+      surfaceSplits = {};
+      for (const [s, rs] of Object.entries(byS)) {
+        surfaceSplits[s] = winRateSplit(rs);
+      }
     }
   }
 
   // ── Duration splits ───────────────────────────────────────
   const byDur: Record<string, MatchStatRow[]> = { short: [], medium: [], long: [] };
-  for (const r of limited) {
+  for (const r of resultRows) {
     const cat = classifyMatchLength(r.duration_min);
     if (cat !== "unknown") byDur[cat].push(r);
   }
@@ -171,7 +188,7 @@ function computeFromRows(rows: MatchStatRow[], teSlug: string, surface: string, 
 
   // ── Time-of-day splits ────────────────────────────────────
   const byTod: Record<string, MatchStatRow[]> = { day: [], evening: [], night: [] };
-  for (const r of limited) {
+  for (const r of resultRows) {
     const tod = r.time_of_day;
     if (tod && tod in byTod) byTod[tod].push(r);
   }
@@ -184,7 +201,7 @@ function computeFromRows(rows: MatchStatRow[], teSlug: string, surface: string, 
   // ── Opponent style splits ─────────────────────────────────
   const styleKeys: PlayerStyle[] = ["big-server", "aggressive-baseliner", "all-court", "counter-puncher", "baseliner"];
   const byStyle: Record<string, MatchStatRow[]> = Object.fromEntries(styleKeys.map((k) => [k, []]));
-  for (const r of limited) {
+  for (const r of resultRows) {
     const style = r.opponent_style;
     if (style && style in byStyle) byStyle[style].push(r);
   }
@@ -199,8 +216,9 @@ function computeFromRows(rows: MatchStatRow[], teSlug: string, surface: string, 
   // ── Round splits ──────────────────────────────────────────
   const roundOrder = ["R128", "R64", "R32", "R16", "QF", "SF", "F", "RR", "BR"];
   const byRound: Record<string, MatchStatRow[]> = {};
-  for (const r of limited) {
+  for (const r of resultRows) {
     const rnd = r.round ?? "unknown";
+    if (rnd === "unknown") continue;
     if (!byRound[rnd]) byRound[rnd] = [];
     byRound[rnd].push(r);
   }
@@ -212,7 +230,7 @@ function computeFromRows(rows: MatchStatRow[], teSlug: string, surface: string, 
   // ── Level splits ──────────────────────────────────────────
   const levelOrder = ["grand-slam", "masters-1000", "atp-500", "atp-250", "atp-finals", "other"];
   const byLevel: Record<string, MatchStatRow[]> = {};
-  for (const r of limited) {
+  for (const r of resultRows) {
     const lvl = r.tourney_level ?? "other";
     if (!byLevel[lvl]) byLevel[lvl] = [];
     byLevel[lvl].push(r);
@@ -223,13 +241,13 @@ function computeFromRows(rows: MatchStatRow[], teSlug: string, surface: string, 
   }
 
   // ── Indoor splits ─────────────────────────────────────────
-  const indoorRows   = limited.filter((r) => r.indoor === 1);
-  const outdoorRows  = limited.filter((r) => r.indoor === 0);
+  const indoorRows  = resultRows.filter((r) => r.indoor === 1);
+  const outdoorRows = resultRows.filter((r) => r.indoor === 0);
   const indoorSplits = { indoor: winRateSplit(indoorRows), outdoor: winRateSplit(outdoorRows) };
 
   // ── Tiebreak stats ────────────────────────────────────────
   let tbPlayed = 0, tbWon = 0;
-  for (const r of limited) {
+  for (const r of resultRows) {
     if (r.tb_played != null) tbPlayed += r.tb_played;
     if (r.tb_won   != null) tbWon   += r.tb_won;
   }
@@ -240,8 +258,8 @@ function computeFromRows(rows: MatchStatRow[], teSlug: string, surface: string, 
   };
 
   // ── 3rd / 5th set stats ───────────────────────────────────
-  const bestOf3Rows = limited.filter((r) => r.best_of === 3);
-  const bestOf5Rows = limited.filter((r) => r.best_of === 5);
+  const bestOf3Rows = resultRows.filter((r) => r.best_of === 3);
+  const bestOf5Rows = resultRows.filter((r) => r.best_of === 5);
 
   const thirdSetRows = bestOf3Rows.filter((r) => r.sets_played === 3);
   const fifthSetRows = bestOf5Rows.filter((r) => r.sets_played != null && r.sets_played >= 4);
@@ -263,29 +281,28 @@ function computeFromRows(rows: MatchStatRow[], teSlug: string, surface: string, 
   };
 
   // ── Opponent rank splits ──────────────────────────────────
-  function rankBucket(rows: MatchStatRow[], maxRank: number): MatchStatRow[] {
-    return rows.filter((r) => r.opponent_rank != null && r.opponent_rank <= maxRank);
+  function rankBucket(src: MatchStatRow[], maxRank: number): MatchStatRow[] {
+    return src.filter((r) => r.opponent_rank != null && r.opponent_rank <= maxRank);
   }
-  const top10  = rankBucket(limited, 10);
-  const top20  = rankBucket(limited, 20);
-  const top50  = rankBucket(limited, 50);
-  const top100 = rankBucket(limited, 100);
-  const rest   = limited.filter((r) => r.opponent_rank == null || r.opponent_rank > 100);
+  const top10  = rankBucket(resultRows, 10);
+  const top20  = rankBucket(resultRows, 20);
+  const top50  = rankBucket(resultRows, 50);
+  const top100 = rankBucket(resultRows, 100);
+  const rankRest = resultRows.filter((r) => r.opponent_rank == null || r.opponent_rank > 100);
   const opponentRankSplits: OpponentRankSplits = {
     top10:  winRateSplit(top10),
     top20:  winRateSplit(top20),
     top50:  winRateSplit(top50),
     top100: winRateSplit(top100),
-    rest:   winRateSplit(rest),
+    rest:   winRateSplit(rankRest),
   };
 
   // ── Streaks ───────────────────────────────────────────────
-  // limited is sorted DESC by date — compute from newest to oldest
+  // resultRows sorted DESC — iterate oldest-first for streak tracking
   let currentStreak = 0;
   let longestWin = 0, longestLoss = 0;
   let curWin = 0, curLoss = 0;
-  for (const r of [...limited].reverse()) {
-    // oldest-first for streak tracking
+  for (const r of [...resultRows].reverse()) {
     if (r.result === "W") {
       curWin++; curLoss = 0;
       if (curWin > longestWin) longestWin = curWin;
@@ -294,45 +311,44 @@ function computeFromRows(rows: MatchStatRow[], teSlug: string, surface: string, 
       if (curLoss > longestLoss) longestLoss = curLoss;
     }
   }
-  // current streak from the most recent matches
-  let i = 0;
-  const first = limited[0]?.result;
-  if (first === "W") {
-    while (i < limited.length && limited[i].result === "W") { currentStreak++; i++; }
-  } else if (first === "L") {
-    while (i < limited.length && limited[i].result === "L") { currentStreak--; i++; }
+  let si = 0;
+  const firstResult = resultRows[0]?.result;
+  if (firstResult === "W") {
+    while (si < resultRows.length && resultRows[si].result === "W") { currentStreak++; si++; }
+  } else if (firstResult === "L") {
+    while (si < resultRows.length && resultRows[si].result === "L") { currentStreak--; si++; }
   }
   const streaks: Streaks = { current: currentStreak, longestWin, longestLoss };
 
   // ── BP conversion as returner ─────────────────────────────
   const bpConversionPct = pct(
-    limited.map((r) => r.bp_converted),
-    limited.map((r) => r.bp_opportunities)
+    resultRows.map((r) => r.bp_converted),
+    resultRows.map((r) => r.bp_opportunities)
   );
 
   // ── Avg duration ─────────────────────────────────────────
-  const avgDuration = avg(limited.map((r) => r.duration_min));
+  const avgDuration = avg(resultRows.map((r) => r.duration_min));
 
   return {
     slug: teSlug,
     surface,
     windowN,
-    matchesUsed: limited.length,
+    matchesUsed: resultRows.length,  // número de partidos con resultado real
     winRate: total > 0 ? wins / total : null,
     wins,
     losses,
-    avgAces:          avg(limited.map((r) => r.aces)),
-    avgDoubleFaults:  avg(limited.map((r) => r.double_faults)),
-    firstServePct:    pct(limited.map((r) => r.first_in), limited.map((r) => r.serve_pts)),
-    firstServeWonPct: pct(limited.map((r) => r.first_won), limited.map((r) => r.first_in)),
+    avgAces:          avg(serveRows.map((r) => r.aces)),
+    avgDoubleFaults:  avg(serveRows.map((r) => r.double_faults)),
+    firstServePct:    pct(serveRows.map((r) => r.first_in), serveRows.map((r) => r.serve_pts)),
+    firstServeWonPct: pct(serveRows.map((r) => r.first_won), serveRows.map((r) => r.first_in)),
     secondServeWonPct: pct(
-      limited.map((r) => r.second_won),
-      limited.map((r) => (r.serve_pts !== null && r.first_in !== null ? r.serve_pts - r.first_in : null))
+      serveRows.map((r) => r.second_won),
+      serveRows.map((r) => (r.serve_pts !== null && r.first_in !== null ? r.serve_pts - r.first_in : null))
     ),
-    bpSavePct:      pct(limited.map((r) => r.bp_saved), limited.map((r) => r.bp_faced)),
+    bpSavePct:      pct(serveRows.map((r) => r.bp_saved), serveRows.map((r) => r.bp_faced)),
     bpConversionPct,
-    avgWinners:     avg(limited.map((r) => r.winners)),
-    avgUnforced:    avg(limited.map((r) => r.unforced_errors)),
+    avgWinners:     avg(shotRows.map((r) => r.winners)),
+    avgUnforced:    avg(shotRows.map((r) => r.unforced_errors)),
     avgDuration,
     surfaceSplits,
     durationSplits,
@@ -379,13 +395,15 @@ export async function getPlayerPatterns(
     return deserializePattern(cached);
   }
 
-  // Primero intenta solo últimos 24 meses
+  // Primero intenta solo últimos 24 meses — sin límite para asegurar que
+  // resultRows (sackmann) y shotRows (charting) tengan suficientes filas cada uno.
   const since24m = monthsAgo(24);
-  let rows = getPlayerMatches(teSlug, { surface: surface || undefined, since: since24m, limit: windowN + 50 });
+  let rows = getPlayerMatches(teSlug, { surface: surface || undefined, since: since24m });
 
-  // Si hay muy pocos datos recientes, usa todo el histórico
-  if (rows.length < MIN_RECENT_MATCHES) {
-    rows = getPlayerMatches(teSlug, { surface: surface || undefined, limit: windowN + 100 });
+  // Si hay pocos partidos con resultado real, amplía a todo el histórico
+  const recentWithResult = rows.filter((r) => r.result !== null).length;
+  if (recentWithResult < MIN_RECENT_MATCHES) {
+    rows = getPlayerMatches(teSlug, { surface: surface || undefined });
   }
 
   if (rows.length === 0) return null;
