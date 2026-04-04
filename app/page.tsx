@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import type { ATPPlayer } from "./api/rankings/route";
 import type { ATPMatch } from "./api/matches/route";
 import type { PredictionResult, FactorResult } from "../lib/prediction/engine";
@@ -105,6 +105,18 @@ export default function Home() {
   // Map: lastName(lower) → photo URL — construido desde el ranking top 100
   const [rankingMap, setRankingMap] = useState<Map<string, string>>(new Map());
 
+  // Calendario de días
+  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const [selectedDate, setSelectedDate] = useState<string>(todayStr);
+
+  const weekDays = useMemo(() => {
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - i));
+      return d.toISOString().slice(0, 10);
+    });
+  }, []);
+
   // Predicción
   const [expandedMatch, setExpandedMatch] = useState<string | null>(null);
   const [predictions, setPredictions] = useState<Record<string, PredictionResult>>({});
@@ -127,7 +139,7 @@ export default function Home() {
           tourneyLevel: inferTourneyLevel(m.tournament),
           surface: m.surface ?? "hard",
           timeOfDay: undefined,
-          date: new Date().toISOString().slice(0, 10),
+          date: selectedDate,
         }),
       });
       if (res.ok) {
@@ -137,7 +149,7 @@ export default function Home() {
     } catch { /* ignore */ } finally {
       setLoadingPred((prev) => ({ ...prev, [m.id]: false }));
     }
-  }, [predictions, loadingPred]);
+  }, [predictions, loadingPred, selectedDate]);
 
   const handleMatchClick = useCallback((m: ATPMatch) => {
     const isExpanding = expandedMatch !== m.id;
@@ -156,6 +168,7 @@ export default function Home() {
     setRankingMap(m);
   }, []);
 
+  // Cargar rankings una sola vez
   useEffect(() => {
     fetch("/api/rankings")
       .then((r) => r.json())
@@ -167,8 +180,15 @@ export default function Home() {
       })
       .catch(() => setPlayers([]))
       .finally(() => setLoading(false));
+  }, [buildRankingMap]);
 
-    fetch("/api/matches")
+  // Recargar partidos cuando cambia la fecha seleccionada
+  useEffect(() => {
+    setMatchesLoading(true);
+    setMatches([]);
+    setExpandedMatch(null);
+    const dateQ = selectedDate !== todayStr ? `?date=${selectedDate}` : "";
+    fetch(`/api/matches${dateQ}`)
       .then((r) => r.json())
       .then((data) => {
         const all: ATPMatch[] = data.matches ?? [];
@@ -176,7 +196,7 @@ export default function Home() {
       })
       .catch(() => setMatches([]))
       .finally(() => setMatchesLoading(false));
-  }, []);
+  }, [selectedDate, todayStr]);
 
   const scroll = (dir: "left" | "right") => {
     if (!carouselRef.current) return;
@@ -242,6 +262,16 @@ export default function Home() {
         .pct{font-family:'Bebas Neue',cursive;font-size:40px;line-height:1;}
         .insight-dot{width:5px;height:5px;border-radius:50%;background:var(--acid);flex-shrink:0;margin-top:5px;}
         .noise{background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.025'/%3E%3C/svg%3E");pointer-events:none;position:fixed;inset:0;z-index:999;}
+        .day-btn{display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 10px;border-radius:10px;background:var(--bg2);border:1px solid var(--border);cursor:pointer;transition:all 0.2s;min-width:48px;}
+        .day-btn:hover{border-color:rgba(200,241,53,0.3);}
+        .day-btn.active{background:var(--acid);border-color:var(--acid);}
+        .day-btn.active .day-name{color:#080c10;}
+        .day-btn.active .day-num{color:#080c10;}
+        .day-name{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);}
+        .day-num{font-family:'Bebas Neue',cursive;font-size:22px;line-height:1;color:white;}
+        .score-str{font-family:'Space Mono',monospace;font-size:11px;color:var(--acid);letter-spacing:0.05em;}
+        .pred-result-ok{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;padding:2px 7px;border-radius:4px;background:rgba(200,241,53,0.12);color:var(--acid);border:1px solid rgba(200,241,53,0.25);}
+        .pred-result-ko{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;padding:2px 7px;border-radius:4px;background:rgba(255,100,100,0.1);color:#ff8080;border:1px solid rgba(255,100,100,0.2);}
       `}</style>
 
       <div className="noise" />
@@ -342,12 +372,34 @@ export default function Home() {
       {/* Partidos */}
       <section className="px-6 py-12">
         <div className="max-w-6xl mx-auto">
+          {/* Selector de día */}
+          <div className="flex gap-1.5 mb-6 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+            {weekDays.map((day) => {
+              const d = new Date(day + "T12:00:00");
+              const isSelected = day === selectedDate;
+              const isToday2 = day === todayStr;
+              const dayName = d.toLocaleDateString("es-ES", { weekday: "short" });
+              return (
+                <button
+                  key={day}
+                  className={`day-btn${isSelected ? " active" : ""}`}
+                  onClick={() => setSelectedDate(day)}
+                >
+                  <span className="day-name">{isToday2 ? "Hoy" : dayName}</span>
+                  <span className="day-num">{d.getDate()}</span>
+                </button>
+              );
+            })}
+          </div>
+
           <div className="flex items-end justify-between mb-6">
             <div>
               <div className="slabel mb-1.5">
-                {new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+                {new Date(selectedDate + "T12:00:00").toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
               </div>
-              <h2 className="fd text-4xl tracking-wide">PARTIDOS ATP HOY</h2>
+              <h2 className="fd text-4xl tracking-wide">
+                {selectedDate === todayStr ? "PARTIDOS ATP HOY" : "RESULTADOS ATP"}
+              </h2>
             </div>
             <div className="flex items-center gap-2 fm text-xs" style={{ color: "var(--muted)" }}>
               <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--acid)" }} />
@@ -392,17 +444,30 @@ export default function Home() {
                         </span>
                         {isLive && <span className="fm text-[9px] tracking-widest" style={{ color: "#c8f135" }}>LIVE</span>}
                         {isFinished && <span className="fm text-[9px] tracking-widest" style={{ color: "var(--muted)" }}>FIN</span>}
+                        {isFinished && m.score && (
+                          <span className="score-str mt-0.5">{m.score}</span>
+                        )}
                       </div>
 
                       {/* Jugadores */}
                       <a href={`/player/${m.player1Slug}`} onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit", minWidth: 0 }}>
-                        <PlayerPhoto name={m.player1} slug={m.player1Slug} rankingMap={rankingMap} size={52} />
-                        <div className="fb font-semibold text-base leading-tight">{m.player1}</div>
+                        <PlayerPhoto name={m.player1} slug={m.player1Slug} rankingMap={rankingMap} size={52}
+                          style={{ opacity: isFinished && m.winner === "player2" ? 0.45 : 1 }} />
+                        <div className="fb font-semibold text-base leading-tight"
+                          style={{ color: isFinished && m.winner === "player1" ? "var(--acid)" : isFinished && m.winner === "player2" ? "rgba(255,255,255,0.35)" : "white" }}>
+                          {m.player1}
+                          {isFinished && m.winner === "player1" && <span className="fm text-[9px] ml-1.5" style={{ color: "var(--acid)" }}>✓</span>}
+                        </div>
                       </a>
                       <div className="fm text-[10px]" style={{ color: "var(--muted)", flexShrink: 0 }}>VS</div>
                       <a href={`/player/${m.player2Slug}`} onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit", minWidth: 0 }}>
-                        <PlayerPhoto name={m.player2} slug={m.player2Slug} rankingMap={rankingMap} size={52} style={{ opacity: 0.75 }} />
-                        <div className="fb font-semibold text-base leading-tight" style={{ color: "rgba(255,255,255,0.6)" }}>{m.player2}</div>
+                        <PlayerPhoto name={m.player2} slug={m.player2Slug} rankingMap={rankingMap} size={52}
+                          style={{ opacity: isFinished && m.winner === "player1" ? 0.45 : isFinished ? 1 : 0.75 }} />
+                        <div className="fb font-semibold text-base leading-tight"
+                          style={{ color: isFinished && m.winner === "player2" ? "var(--acid)" : isFinished && m.winner === "player1" ? "rgba(255,255,255,0.35)" : "rgba(255,255,255,0.6)" }}>
+                          {m.player2}
+                          {isFinished && m.winner === "player2" && <span className="fm text-[9px] ml-1.5" style={{ color: "var(--acid)" }}>✓</span>}
+                        </div>
                       </a>
 
                       {/* Torneo + ronda + superficie */}
@@ -440,6 +505,25 @@ export default function Home() {
                                 </div>
                               </div>
                             </div>
+
+                            {/* Resultado real vs predicción */}
+                            {isFinished && m.winner && (
+                              (() => {
+                                const predWinner = pred.player1.winPct > pred.player2.winPct ? "player1" : "player2";
+                                const correct = predWinner === m.winner;
+                                const winnerName = m.winner === "player1" ? pred.player1.name : pred.player2.name;
+                                return (
+                                  <div className="flex items-center gap-2 mb-4">
+                                    <span className={correct ? "pred-result-ok" : "pred-result-ko"}>
+                                      {correct ? "✓ Predicción correcta" : "✗ Predicción incorrecta"}
+                                    </span>
+                                    <span className="fm text-[10px]" style={{ color: "var(--muted)" }}>
+                                      Ganó {winnerName.split(" ").pop()} · {m.score}
+                                    </span>
+                                  </div>
+                                );
+                              })()
+                            )}
 
                             {/* Meta badges */}
                             <div className="flex flex-wrap gap-2 mb-5">
