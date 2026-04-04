@@ -352,20 +352,42 @@ function computeFromRows(rows: MatchStatRow[], teSlug: string, surface: string, 
 
 // ── API pública ───────────────────────────────────────────
 
+/** Fecha ISO de hace N meses */
+function monthsAgo(n: number): string {
+  const d = new Date();
+  d.setMonth(d.getMonth() - n);
+  return d.toISOString().slice(0, 10);
+}
+
 /**
  * Devuelve los patrones para un jugador (con caché de 30 min en DB).
+ *
+ * Estrategia de recencia:
+ *   1. Intenta usar solo los últimos 24 meses (temporadas recientes = más relevantes).
+ *   2. Si hay menos de MIN_RECENT_MATCHES con ese filtro, amplía a todo el histórico.
+ *   Esto garantiza que Sinner 2024 no se "diluya" con su juego de 2021.
  */
+const MIN_RECENT_MATCHES = 15; // mínimo para no caer al histórico completo
+
 export async function getPlayerPatterns(
   teSlug: string,
   surface = "",
-  windowN = 20
+  windowN = 30
 ): Promise<PlayerPatterns | null> {
   const cached = getPattern(teSlug, surface, windowN);
   if (cached && cached.computed_at && Date.now() / 1000 - cached.computed_at < PATTERN_TTL_MS / 1000) {
     return deserializePattern(cached);
   }
 
-  const rows = getPlayerMatches(teSlug, { surface: surface || undefined, limit: windowN + 100 });
+  // Primero intenta solo últimos 24 meses
+  const since24m = monthsAgo(24);
+  let rows = getPlayerMatches(teSlug, { surface: surface || undefined, since: since24m, limit: windowN + 50 });
+
+  // Si hay muy pocos datos recientes, usa todo el histórico
+  if (rows.length < MIN_RECENT_MATCHES) {
+    rows = getPlayerMatches(teSlug, { surface: surface || undefined, limit: windowN + 100 });
+  }
+
   if (rows.length === 0) return null;
 
   const result = computeFromRows(rows, teSlug, surface, windowN);

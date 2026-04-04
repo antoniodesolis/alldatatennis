@@ -149,7 +149,7 @@ export default function PlayerPage() {
       .then((d) => { if (d?.total !== undefined) setTotalMatches(d.total); })
       .catch(() => {});
 
-    fetch(`/api/player/${encodeURIComponent(slug)}/patterns?window=50`)
+    fetch(`/api/player/${encodeURIComponent(slug)}/patterns?window=30`)
       .then((r) => {
         if (r.status === 404) { setNoData(true); return null; }
         return r.ok ? r.json() : null;
@@ -267,7 +267,7 @@ export default function PlayerPage() {
                   <div>
                     <div className="slabel mb-1">Win rate</div>
                     <div className="big-stat">{pct(all.winRate)}</div>
-                    <div className="fb text-xs mt-1" style={{ color: "var(--muted)" }}>{all.wins}V · {all.losses}D · {all.matchesUsed}p</div>
+                    <div className="fb text-xs mt-1" style={{ color: "var(--muted)" }}>{all.wins}V · {all.losses}D · {all.matchesUsed}p · últ. 24 meses</div>
                   </div>
                   {all.firstServePct != null && (
                     <div>
@@ -340,7 +340,7 @@ export default function PlayerPage() {
 
                   {/* Forma reciente */}
                   <div className="card">
-                    <div className="fb font-semibold text-base mb-4">Forma reciente · últimos {all.recentForm?.length ?? 10}</div>
+                    <div className="fb font-semibold text-base mb-4">Forma reciente · últimos {all.recentForm?.length ?? 10} partidos</div>
                     {all.recentForm && (
                       <div className="flex gap-1.5 flex-wrap mb-5">
                         {all.recentForm.map((r, i) => <FormBadge key={i} result={r} />)}

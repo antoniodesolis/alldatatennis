@@ -56,9 +56,19 @@ export function runMigrations() {
 
   // Migraciones aditivas — ADD COLUMN falla si ya existe, lo ignoramos
   const addCols = [
-    "ALTER TABLE player_match_stats ADD COLUMN match_time      TEXT",
-    "ALTER TABLE player_match_stats ADD COLUMN time_of_day     TEXT",
-    "ALTER TABLE player_match_stats ADD COLUMN opponent_style  TEXT",
+    "ALTER TABLE player_match_stats ADD COLUMN match_time        TEXT",
+    "ALTER TABLE player_match_stats ADD COLUMN time_of_day       TEXT",
+    "ALTER TABLE player_match_stats ADD COLUMN opponent_style    TEXT",
+    "ALTER TABLE player_match_stats ADD COLUMN best_of           INTEGER",
+    "ALTER TABLE player_match_stats ADD COLUMN tourney_level     TEXT",
+    "ALTER TABLE player_match_stats ADD COLUMN indoor            INTEGER",
+    "ALTER TABLE player_match_stats ADD COLUMN opponent_rank     INTEGER",
+    "ALTER TABLE player_match_stats ADD COLUMN sets_played       INTEGER",
+    "ALTER TABLE player_match_stats ADD COLUMN won_deciding      INTEGER",
+    "ALTER TABLE player_match_stats ADD COLUMN tb_played         INTEGER",
+    "ALTER TABLE player_match_stats ADD COLUMN tb_won            INTEGER",
+    "ALTER TABLE player_match_stats ADD COLUMN bp_converted      INTEGER",
+    "ALTER TABLE player_match_stats ADD COLUMN bp_opportunities  INTEGER",
   ];
   for (const sql of addCols) {
     try { db.exec(sql); } catch { /* columna ya existe */ }

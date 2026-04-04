@@ -1,29 +1,16 @@
 /**
- * Ingesta los CSV históricos de Jeff Sackmann (tennis_atp en GitHub).
- * Descarga atp_matches_{year}.csv para los años pedidos y carga las
- * estadísticas de servicio en la tabla player_match_stats.
- *
- * También descarga charting-m-stats-Overview.csv (Match Charting Project)
- * que añade winners y unforced_errors a matches que no los tienen.
+ * Ingesta CSV históricos de Jeff Sackmann (tennis_atp en GitHub).
+ * Extrae TODOS los campos disponibles por partido.
  */
 
-import { upsertMatchStat, upsertPlayer, markMatchProcessed } from "../db/queries";
+import { getDb } from "../db/client";
+import { upsertPlayer, markMatchProcessed } from "../db/queries";
 import { nameToSlug, normalizeSurface, normalizeRound } from "../analytics/player-resolver";
 import { getPlayerStyle } from "../analytics/player-styles";
+import { playerScoreStats } from "./score-parser";
+import { getTourneyLevel, isIndoor } from "./tourney-meta";
 
 const UA = "Mozilla/5.0 (compatible; AllDataTennis/1.0)";
-
-// Columnas del CSV atp_matches_{year}.csv de Sackmann
-const EXPECTED_COLS = [
-  "tourney_id", "tourney_name", "surface", "draw_size", "tourney_level",
-  "tourney_date", "match_num", "winner_id", "winner_seed", "winner_entry",
-  "winner_name", "winner_hand", "winner_ht", "winner_ioc", "winner_age",
-  "loser_id", "loser_seed", "loser_entry", "loser_name", "loser_hand",
-  "loser_ht", "loser_ioc", "loser_age", "score", "best_of", "round",
-  "minutes", "w_ace", "w_df", "w_svpt", "w_1stIn", "w_1stWon", "w_2ndWon",
-  "w_SvGms", "w_bpSaved", "w_bpFaced", "l_ace", "l_df", "l_svpt",
-  "l_1stIn", "l_1stWon", "l_2ndWon", "l_SvGms", "l_bpSaved", "l_bpFaced",
-];
 
 function parseCSVLine(line: string): string[] {
   const result: string[] = [];
@@ -38,13 +25,13 @@ function parseCSVLine(line: string): string[] {
   return result;
 }
 
-function n(v: string): number | null {
+function n(v: string | undefined): number | null {
+  if (!v || v.trim() === "") return null;
   const x = parseFloat(v);
   return isNaN(x) ? null : x;
 }
 
 function sackmannDateToISO(d: string): string {
-  // "20240101" → "2024-01-01"
   if (d.length === 8) return `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
   return d;
 }
@@ -52,19 +39,15 @@ function sackmannDateToISO(d: string): string {
 async function fetchCSV(url: string): Promise<string> {
   const res = await fetch(url, {
     headers: { "User-Agent": UA },
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(120_000),
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status} para ${url}`);
   return res.text();
 }
 
-/**
- * Ingesta un año del CSV principal de Sackmann.
- * Devuelve el número de filas insertadas.
- */
 export async function ingestSackmannYear(year: number): Promise<{ inserted: number; skipped: number }> {
   const url = `https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_matches_${year}.csv`;
-  console.log(`[sackmann] Descargando ${url}`);
+  console.log(`[sackmann] Descargando ${url}…`);
   const text = await fetchCSV(url);
 
   const lines = text.split("\n").filter(Boolean);
@@ -72,178 +55,291 @@ export async function ingestSackmannYear(year: number): Promise<{ inserted: numb
 
   const header = parseCSVLine(lines[0]);
   const idx = (col: string) => header.indexOf(col);
+
+  const db = getDb();
+  const insertStmt = db.prepare(`
+    INSERT INTO player_match_stats
+      (te_slug, te_match_id, match_date, tournament, surface, round,
+       opponent_slug, result, score, duration_min,
+       aces, double_faults, serve_pts, first_in, first_won, second_won,
+       serve_games, bp_saved, bp_faced, return_pts_won,
+       winners, unforced_errors, match_time, time_of_day, opponent_style,
+       best_of, tourney_level, indoor, opponent_rank,
+       sets_played, won_deciding, tb_played, tb_won, bp_converted, bp_opportunities,
+       source)
+    VALUES
+      (@te_slug, @te_match_id, @match_date, @tournament, @surface, @round,
+       @opponent_slug, @result, @score, @duration_min,
+       @aces, @double_faults, @serve_pts, @first_in, @first_won, @second_won,
+       @serve_games, @bp_saved, @bp_faced, @return_pts_won,
+       @winners, @unforced_errors, @match_time, @time_of_day, @opponent_style,
+       @best_of, @tourney_level, @indoor, @opponent_rank,
+       @sets_played, @won_deciding, @tb_played, @tb_won, @bp_converted, @bp_opportunities,
+       @source)
+    ON CONFLICT(te_slug, te_match_id) DO UPDATE SET
+      surface          = COALESCE(excluded.surface, surface),
+      round            = COALESCE(excluded.round, round),
+      score            = COALESCE(excluded.score, score),
+      duration_min     = COALESCE(excluded.duration_min, duration_min),
+      aces             = COALESCE(excluded.aces, aces),
+      double_faults    = COALESCE(excluded.double_faults, double_faults),
+      serve_pts        = COALESCE(excluded.serve_pts, serve_pts),
+      first_in         = COALESCE(excluded.first_in, first_in),
+      first_won        = COALESCE(excluded.first_won, first_won),
+      second_won       = COALESCE(excluded.second_won, second_won),
+      serve_games      = COALESCE(excluded.serve_games, serve_games),
+      bp_saved         = COALESCE(excluded.bp_saved, bp_saved),
+      bp_faced         = COALESCE(excluded.bp_faced, bp_faced),
+      return_pts_won   = COALESCE(excluded.return_pts_won, return_pts_won),
+      best_of          = COALESCE(excluded.best_of, best_of),
+      tourney_level    = COALESCE(excluded.tourney_level, tourney_level),
+      indoor           = COALESCE(excluded.indoor, indoor),
+      opponent_rank    = COALESCE(excluded.opponent_rank, opponent_rank),
+      sets_played      = COALESCE(excluded.sets_played, sets_played),
+      won_deciding     = COALESCE(excluded.won_deciding, won_deciding),
+      tb_played        = COALESCE(excluded.tb_played, tb_played),
+      tb_won           = COALESCE(excluded.tb_won, tb_won),
+      bp_converted     = COALESCE(excluded.bp_converted, bp_converted),
+      bp_opportunities = COALESCE(excluded.bp_opportunities, bp_opportunities),
+      opponent_style   = COALESCE(excluded.opponent_style, opponent_style),
+      source           = COALESCE(excluded.source, source)
+  `);
+
+  const markStmt = db.prepare(`
+    INSERT INTO processed_matches (te_match_id, status)
+    VALUES (?, ?)
+    ON CONFLICT(te_match_id) DO UPDATE SET status = excluded.status, processed_at = unixepoch()
+  `);
 
   let inserted = 0;
   let skipped = 0;
 
-  for (let i = 1; i < lines.length; i++) {
-    const row = parseCSVLine(lines[i]);
-    if (row.length < 20) continue;
+  // Envolver en transacción para rendimiento
+  const ingestAll = db.transaction(() => {
+    for (let i = 1; i < lines.length; i++) {
+      const row = parseCSVLine(lines[i]);
+      if (row.length < 20) continue;
 
-    const winnerName = row[idx("winner_name")];
-    const loserName  = row[idx("loser_name")];
-    if (!winnerName || !loserName) continue;
+      const winnerName = row[idx("winner_name")];
+      const loserName  = row[idx("loser_name")];
+      if (!winnerName || !loserName) continue;
 
-    const winnerId   = n(row[idx("winner_id")]);
-    const loserId    = n(row[idx("loser_id")]);
-    const winnerSlug = nameToSlug(winnerName);
-    const loserSlug  = nameToSlug(loserName);
+      const score      = row[idx("score")] ?? "";
+      const bestOf     = parseInt(row[idx("best_of")] ?? "3") || 3;
+      const rawSurface = row[idx("surface")] ?? "";
+      const surface    = normalizeSurface(rawSurface);
+      const round      = normalizeRound(row[idx("round")] ?? "");
+      const rawDate    = row[idx("tourney_date")] ?? "";
+      const matchDate  = sackmannDateToISO(rawDate);
+      const tournament = row[idx("tourney_name")] ?? "";
+      const minutes    = n(row[idx("minutes")]);
+      const teMatchId  = `sack_${year}_${row[idx("tourney_id")]}_${row[idx("match_num")]}`;
 
-    const rawDate    = row[idx("tourney_date")] ?? "";
-    const matchDate  = sackmannDateToISO(rawDate);
-    const tournament = row[idx("tourney_name")] ?? "";
-    const surface    = normalizeSurface(row[idx("surface")] ?? "");
-    const round      = normalizeRound(row[idx("round")] ?? "");
-    const score      = row[idx("score")] ?? "";
-    const minutes    = n(row[idx("minutes")]);
-    const teMatchId  = `sack_${year}_${row[idx("tourney_id")]}_${row[idx("match_num")]}`;
+      const level  = getTourneyLevel(row[idx("tourney_level")] ?? "", tournament);
+      const indoor = isIndoor(tournament, rawSurface) ? 1 : 0;
 
-    // Registrar jugadores
-    if (winnerSlug) upsertPlayer({ te_slug: winnerSlug, atp_code: null, full_name: winnerName, sackmann_id: winnerId ? Math.round(winnerId) : null });
-    if (loserSlug) upsertPlayer({ te_slug: loserSlug, atp_code: null, full_name: loserName, sackmann_id: loserId ? Math.round(loserId) : null });
+      const winnerId   = n(row[idx("winner_id")]);
+      const loserId    = n(row[idx("loser_id")]);
+      const winnerRank = n(row[idx("winner_rank")]);
+      const loserRank  = n(row[idx("loser_rank")]);
 
-    if (!winnerSlug && !loserSlug) { skipped++; continue; }
+      const winnerSlug = nameToSlug(winnerName);
+      const loserSlug  = nameToSlug(loserName);
 
-    const baseMatch = {
-      te_match_id: teMatchId, match_date: matchDate, tournament, surface, round, score,
-      duration_min: minutes ? Math.round(minutes) : null,
-      match_time: null, time_of_day: null,
-      source: "sackmann_csv",
-    };
+      if (!winnerSlug && !loserSlug) { skipped++; continue; }
 
-    // Fila del ganador
-    if (winnerSlug) {
-      upsertMatchStat({
-        ...baseMatch,
-        te_slug: winnerSlug,
-        opponent_slug: loserSlug,
-        opponent_style: loserSlug ? getPlayerStyle(loserSlug) : null,
-        result: "W",
-        aces: n(row[idx("w_ace")]),
-        double_faults: n(row[idx("w_df")]),
-        serve_pts: n(row[idx("w_svpt")]),
-        first_in: n(row[idx("w_1stIn")]),
-        first_won: n(row[idx("w_1stWon")]),
-        second_won: n(row[idx("w_2ndWon")]),
-        serve_games: n(row[idx("w_SvGms")]),
-        bp_saved: n(row[idx("w_bpSaved")]),
-        bp_faced: n(row[idx("w_bpFaced")]),
+      // Registrar jugadores
+      if (winnerSlug) upsertPlayer({ te_slug: winnerSlug, atp_code: null, full_name: winnerName, sackmann_id: winnerId ? Math.round(winnerId) : null });
+      if (loserSlug)  upsertPlayer({ te_slug: loserSlug,  atp_code: null, full_name: loserName,  sackmann_id: loserId  ? Math.round(loserId)  : null });
+
+      // Parsear score
+      const wStats = playerScoreStats(score, "W", bestOf);
+      const lStats = playerScoreStats(score, "L", bestOf);
+
+      // BP como restador
+      // Ganador como restador: loser's serve stats
+      const wBpConverted    = n(row[idx("l_bpFaced")]) !== null && n(row[idx("l_bpSaved")]) !== null
+        ? (n(row[idx("l_bpFaced")])! - n(row[idx("l_bpSaved")])!) : null;
+      const wBpOpportunities = n(row[idx("l_bpFaced")]);
+
+      // Perdedor como restador: winner's serve stats
+      const lBpConverted    = n(row[idx("w_bpFaced")]) !== null && n(row[idx("w_bpSaved")]) !== null
+        ? (n(row[idx("w_bpFaced")])! - n(row[idx("w_bpSaved")])!) : null;
+      const lBpOpportunities = n(row[idx("w_bpFaced")]);
+
+      const base = {
+        te_match_id: teMatchId,
+        match_date: matchDate,
+        tournament,
+        surface,
+        round,
+        score,
+        duration_min: minutes ? Math.round(minutes) : null,
+        match_time: null,
+        time_of_day: null,
+        best_of: bestOf,
+        tourney_level: level,
+        indoor,
         return_pts_won: null,
         winners: null,
         unforced_errors: null,
-      });
-      inserted++;
+        source: "sackmann_csv",
+      };
+
+      if (winnerSlug) {
+        insertStmt.run({
+          ...base,
+          te_slug: winnerSlug,
+          opponent_slug: loserSlug,
+          opponent_style: loserSlug ? getPlayerStyle(loserSlug) : null,
+          result: "W",
+          opponent_rank: loserRank,
+          aces:          n(row[idx("w_ace")]),
+          double_faults: n(row[idx("w_df")]),
+          serve_pts:     n(row[idx("w_svpt")]),
+          first_in:      n(row[idx("w_1stIn")]),
+          first_won:     n(row[idx("w_1stWon")]),
+          second_won:    n(row[idx("w_2ndWon")]),
+          serve_games:   n(row[idx("w_SvGms")]),
+          bp_saved:      n(row[idx("w_bpSaved")]),
+          bp_faced:      n(row[idx("w_bpFaced")]),
+          sets_played:   wStats?.setsPlayed ?? null,
+          won_deciding:  wStats?.wonDeciding ? 1 : 0,
+          tb_played:     wStats?.tbPlayed ?? null,
+          tb_won:        wStats?.tbWon ?? null,
+          bp_converted:  wBpConverted,
+          bp_opportunities: wBpOpportunities,
+        });
+        inserted++;
+      }
+
+      if (loserSlug) {
+        insertStmt.run({
+          ...base,
+          te_slug: loserSlug,
+          opponent_slug: winnerSlug,
+          opponent_style: winnerSlug ? getPlayerStyle(winnerSlug) : null,
+          result: "L",
+          opponent_rank: winnerRank,
+          aces:          n(row[idx("l_ace")]),
+          double_faults: n(row[idx("l_df")]),
+          serve_pts:     n(row[idx("l_svpt")]),
+          first_in:      n(row[idx("l_1stIn")]),
+          first_won:     n(row[idx("l_1stWon")]),
+          second_won:    n(row[idx("l_2ndWon")]),
+          serve_games:   n(row[idx("l_SvGms")]),
+          bp_saved:      n(row[idx("l_bpSaved")]),
+          bp_faced:      n(row[idx("l_bpFaced")]),
+          sets_played:   lStats?.setsPlayed ?? null,
+          won_deciding:  lStats?.wonDeciding ? 1 : 0,
+          tb_played:     lStats?.tbPlayed ?? null,
+          tb_won:        lStats?.tbWon ?? null,
+          bp_converted:  lBpConverted,
+          bp_opportunities: lBpOpportunities,
+        });
+        inserted++;
+      }
+
+      markStmt.run(teMatchId, "stats_found");
     }
+  });
 
-    // Fila del perdedor
-    if (loserSlug) {
-      upsertMatchStat({
-        ...baseMatch,
-        te_slug: loserSlug,
-        opponent_slug: winnerSlug,
-        opponent_style: winnerSlug ? getPlayerStyle(winnerSlug) : null,
-        result: "L",
-        aces: n(row[idx("l_ace")]),
-        double_faults: n(row[idx("l_df")]),
-        serve_pts: n(row[idx("l_svpt")]),
-        first_in: n(row[idx("l_1stIn")]),
-        first_won: n(row[idx("l_1stWon")]),
-        second_won: n(row[idx("l_2ndWon")]),
-        serve_games: n(row[idx("l_SvGms")]),
-        bp_saved: n(row[idx("l_bpSaved")]),
-        bp_faced: n(row[idx("l_bpFaced")]),
-        return_pts_won: null,
-        winners: null,
-        unforced_errors: null,
-      });
-      inserted++;
-    }
-
-    markMatchProcessed(teMatchId, "stats_found");
-  }
-
+  ingestAll();
   console.log(`[sackmann] ${year}: ${inserted} filas insertadas, ${skipped} omitidas`);
   return { inserted, skipped };
 }
 
-/**
- * Ingesta el CSV de Match Charting Project para enriquecer winners/unforced.
- * URL: https://raw.githubusercontent.com/JeffSackmann/tennis_MatchChartingProject/master/charting-m-stats-Overview.csv
- */
 export async function ingestChartingCSV(): Promise<{ enriched: number }> {
   const url = "https://raw.githubusercontent.com/JeffSackmann/tennis_MatchChartingProject/master/charting-m-stats-Overview.csv";
-  console.log(`[charting] Descargando ${url}`);
+  console.log(`[charting] Descargando ${url}…`);
   const text = await fetchCSV(url);
-
   const lines = text.split("\n").filter(Boolean);
   if (lines.length < 2) throw new Error("CSV vacío");
 
   const header = parseCSVLine(lines[0]);
   const idx = (col: string) => header.indexOf(col);
+  const db = getDb();
+
+  const insertStmt = db.prepare(`
+    INSERT INTO player_match_stats
+      (te_slug, te_match_id, match_date, tournament, surface, round,
+       opponent_slug, result, score, duration_min, match_time, time_of_day,
+       opponent_style, best_of, tourney_level, indoor, opponent_rank,
+       sets_played, won_deciding, tb_played, tb_won, bp_converted, bp_opportunities,
+       aces, double_faults, serve_pts, first_in, first_won, second_won,
+       serve_games, bp_saved, bp_faced, return_pts_won, winners, unforced_errors, source)
+    VALUES
+      (@te_slug, @te_match_id, @match_date, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL, NULL, NULL,
+       @aces, @double_faults, @serve_pts, @first_in, @first_won, @second_won,
+       NULL, @bp_saved, @bp_faced, @return_pts_won, @winners, @unforced_errors, 'charting_csv')
+    ON CONFLICT(te_slug, te_match_id) DO UPDATE SET
+      aces            = COALESCE(excluded.aces, aces),
+      double_faults   = COALESCE(excluded.double_faults, double_faults),
+      serve_pts       = COALESCE(excluded.serve_pts, serve_pts),
+      first_in        = COALESCE(excluded.first_in, first_in),
+      first_won       = COALESCE(excluded.first_won, first_won),
+      second_won      = COALESCE(excluded.second_won, second_won),
+      bp_saved        = COALESCE(excluded.bp_saved, bp_saved),
+      bp_faced        = COALESCE(excluded.bp_faced, bp_faced),
+      return_pts_won  = COALESCE(excluded.return_pts_won, return_pts_won),
+      winners         = COALESCE(excluded.winners, winners),
+      unforced_errors = COALESCE(excluded.unforced_errors, unforced_errors)
+  `);
 
   let enriched = 0;
 
-  for (let i = 1; i < lines.length; i++) {
-    const row = parseCSVLine(lines[i]);
-    if (row.length < 10) continue;
+  const ingestAll = db.transaction(() => {
+    for (let i = 1; i < lines.length; i++) {
+      const row = parseCSVLine(lines[i]);
+      if (row.length < 10) continue;
+      const setCol = row[idx("set")] ?? row[1] ?? "";
+      if (setCol !== "Total") continue;
 
-    // Solo filas de totales
-    const setCol = row[idx("set")] ?? row[1] ?? "";
-    if (setCol !== "Total") continue;
+      const matchId   = row[idx("match_id")] ?? row[0] ?? "";
+      const parts     = matchId.split("-");
+      if (parts.length < 6) continue;
 
-    // match_id: "20251221-M-NextGen_Finals-F-Alexander_Blockx-Learner_Tien"
-    const matchId = row[idx("match_id")] ?? row[0] ?? "";
-    const parts = matchId.split("-");
-    if (parts.length < 6) continue;
+      const matchDate  = (() => {
+        const d = parts[0];
+        return d.length === 8 ? `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}` : d;
+      })();
+      const playerRaw  = (row[idx("player")] ?? "").replace(/_/g, " ");
+      const teSlug     = nameToSlug(playerRaw);
+      if (!teSlug) continue;
 
-    const dateStr = parts[0]; // "20251221"
-    const matchDate = sackmannDateToISO(dateStr);
-    const playerRaw = (row[idx("player")] ?? "").replace(/_/g, " ");
-    const teSlug = nameToSlug(playerRaw);
-    if (!teSlug) continue;
+      const winners  = (() => { const v = row[idx("winners")] ?? row[idx("w")] ?? ""; const x = parseFloat(v); return isNaN(x) ? null : x; })();
+      const unforced = (() => { const v = row[idx("unforced")] ?? row[idx("ue")] ?? ""; const x = parseFloat(v); return isNaN(x) ? null : x; })();
+      if (winners === null && unforced === null) continue;
 
-    const winners = n(row[idx("winners")] ?? row[idx("w")] ?? "");
-    const unforced = n(row[idx("unforced")] ?? row[idx("ue")] ?? "");
-    if (winners === null && unforced === null) continue;
+      const teMatchId = `chart_${matchId.replace(/[^a-z0-9_]/gi, "_")}`;
+      upsertPlayer({ te_slug: teSlug, atp_code: null, full_name: playerRaw, sackmann_id: null });
 
-    // Construir te_match_id único para charting (no coincide con sackmann, pero podemos buscar por fecha+jugador)
-    // Usamos el matchId literal como referencia
-    const teMatchId = `chart_${matchId.replace(/[^a-z0-9_]/gi, "_")}`;
+      const nv = (col: string) => { const v = row[idx(col)] ?? ""; const x = parseFloat(v); return isNaN(x) ? null : x; };
 
-    const playerName = playerRaw;
-    upsertPlayer({ te_slug: teSlug, atp_code: null, full_name: playerName, sackmann_id: null });
+      insertStmt.run({
+        te_slug: teSlug,
+        te_match_id: teMatchId,
+        match_date: matchDate,
+        aces:           nv("ace"),
+        double_faults:  nv("df"),
+        serve_pts:      nv("svPts") ?? nv("serve_pts"),
+        first_in:       nv("1stIn") ?? nv("first_in"),
+        first_won:      nv("1stWon") ?? nv("first_won"),
+        second_won:     nv("2ndWon") ?? nv("second_won"),
+        bp_saved:       nv("bpSaved"),
+        bp_faced:       nv("bpFaced"),
+        return_pts_won: nv("retPtsWon") ?? nv("return_pts_won"),
+        winners,
+        unforced_errors: unforced,
+      });
+      enriched++;
+    }
+  });
 
-    upsertMatchStat({
-      te_slug: teSlug,
-      te_match_id: teMatchId,
-      match_date: matchDate,
-      tournament: null,
-      surface: null,
-      round: null,
-      opponent_slug: null,
-      result: null,
-      score: null,
-      duration_min: null,
-      aces: n(row[idx("ace")] ?? ""),
-      double_faults: n(row[idx("df")] ?? ""),
-      serve_pts: n(row[idx("svPts")] ?? row[idx("serve_pts")] ?? ""),
-      first_in: n(row[idx("1stIn")] ?? row[idx("first_in")] ?? ""),
-      first_won: n(row[idx("1stWon")] ?? row[idx("first_won")] ?? ""),
-      second_won: n(row[idx("2ndWon")] ?? row[idx("second_won")] ?? ""),
-      serve_games: null,
-      bp_saved: n(row[idx("bpSaved")] ?? ""),
-      bp_faced: n(row[idx("bpFaced")] ?? ""),
-      return_pts_won: n(row[idx("retPtsWon")] ?? row[idx("return_pts_won")] ?? ""),
-      winners,
-      unforced_errors: unforced,
-      match_time: null,
-      time_of_day: null,
-      opponent_style: null,
-      source: "charting_csv",
-    });
-    enriched++;
-  }
-
+  ingestAll();
   console.log(`[charting] ${enriched} filas enriquecidas`);
   return { enriched };
 }

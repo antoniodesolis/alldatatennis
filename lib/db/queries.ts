@@ -31,9 +31,19 @@ export interface MatchStatRow {
   return_pts_won: number | null;
   winners: number | null;
   unforced_errors: number | null;
-  match_time: string | null;      // "21:00" hora local del torneo
-  time_of_day: string | null;     // "day" | "evening" | "night"
-  opponent_style: string | null;  // "big-server" | "aggressive-baseliner" | …
+  match_time: string | null;
+  time_of_day: string | null;
+  opponent_style: string | null;
+  best_of: number | null;
+  tourney_level: string | null;   // "grand-slam"|"masters-1000"|"atp-500"|"atp-250"|"atp-finals"|"other"
+  indoor: number | null;          // 1=indoor 0=outdoor
+  opponent_rank: number | null;
+  sets_played: number | null;
+  won_deciding: number | null;    // 1 si ganó el set decisivo
+  tb_played: number | null;
+  tb_won: number | null;
+  bp_converted: number | null;    // BPs convertidos como restador
+  bp_opportunities: number | null; // BPs totales como restador
   source: string | null;
 }
 
@@ -83,34 +93,50 @@ export function upsertMatchStat(row: Omit<MatchStatRow, "id">) {
        opponent_slug, result, score, duration_min,
        aces, double_faults, serve_pts, first_in, first_won, second_won,
        serve_games, bp_saved, bp_faced, return_pts_won,
-       winners, unforced_errors, match_time, time_of_day, opponent_style, source)
+       winners, unforced_errors, match_time, time_of_day, opponent_style,
+       best_of, tourney_level, indoor, opponent_rank,
+       sets_played, won_deciding, tb_played, tb_won, bp_converted, bp_opportunities,
+       source)
     VALUES
       (@te_slug, @te_match_id, @match_date, @tournament, @surface, @round,
        @opponent_slug, @result, @score, @duration_min,
        @aces, @double_faults, @serve_pts, @first_in, @first_won, @second_won,
        @serve_games, @bp_saved, @bp_faced, @return_pts_won,
-       @winners, @unforced_errors, @match_time, @time_of_day, @opponent_style, @source)
+       @winners, @unforced_errors, @match_time, @time_of_day, @opponent_style,
+       @best_of, @tourney_level, @indoor, @opponent_rank,
+       @sets_played, @won_deciding, @tb_played, @tb_won, @bp_converted, @bp_opportunities,
+       @source)
     ON CONFLICT(te_slug, te_match_id) DO UPDATE SET
-      surface         = COALESCE(excluded.surface, surface),
-      round           = COALESCE(excluded.round, round),
-      score           = COALESCE(excluded.score, score),
-      duration_min    = COALESCE(excluded.duration_min, duration_min),
-      aces            = COALESCE(excluded.aces, aces),
-      double_faults   = COALESCE(excluded.double_faults, double_faults),
-      serve_pts       = COALESCE(excluded.serve_pts, serve_pts),
-      first_in        = COALESCE(excluded.first_in, first_in),
-      first_won       = COALESCE(excluded.first_won, first_won),
-      second_won      = COALESCE(excluded.second_won, second_won),
-      serve_games     = COALESCE(excluded.serve_games, serve_games),
-      bp_saved        = COALESCE(excluded.bp_saved, bp_saved),
-      bp_faced        = COALESCE(excluded.bp_faced, bp_faced),
-      return_pts_won  = COALESCE(excluded.return_pts_won, return_pts_won),
-      winners         = COALESCE(excluded.winners, winners),
-      unforced_errors = COALESCE(excluded.unforced_errors, unforced_errors),
-      match_time      = COALESCE(excluded.match_time, match_time),
-      time_of_day     = COALESCE(excluded.time_of_day, time_of_day),
-      opponent_style  = COALESCE(excluded.opponent_style, opponent_style),
-      source          = COALESCE(excluded.source, source)
+      surface          = COALESCE(excluded.surface, surface),
+      round            = COALESCE(excluded.round, round),
+      score            = COALESCE(excluded.score, score),
+      duration_min     = COALESCE(excluded.duration_min, duration_min),
+      aces             = COALESCE(excluded.aces, aces),
+      double_faults    = COALESCE(excluded.double_faults, double_faults),
+      serve_pts        = COALESCE(excluded.serve_pts, serve_pts),
+      first_in         = COALESCE(excluded.first_in, first_in),
+      first_won        = COALESCE(excluded.first_won, first_won),
+      second_won       = COALESCE(excluded.second_won, second_won),
+      serve_games      = COALESCE(excluded.serve_games, serve_games),
+      bp_saved         = COALESCE(excluded.bp_saved, bp_saved),
+      bp_faced         = COALESCE(excluded.bp_faced, bp_faced),
+      return_pts_won   = COALESCE(excluded.return_pts_won, return_pts_won),
+      winners          = COALESCE(excluded.winners, winners),
+      unforced_errors  = COALESCE(excluded.unforced_errors, unforced_errors),
+      match_time       = COALESCE(excluded.match_time, match_time),
+      time_of_day      = COALESCE(excluded.time_of_day, time_of_day),
+      opponent_style   = COALESCE(excluded.opponent_style, opponent_style),
+      best_of          = COALESCE(excluded.best_of, best_of),
+      tourney_level    = COALESCE(excluded.tourney_level, tourney_level),
+      indoor           = COALESCE(excluded.indoor, indoor),
+      opponent_rank    = COALESCE(excluded.opponent_rank, opponent_rank),
+      sets_played      = COALESCE(excluded.sets_played, sets_played),
+      won_deciding     = COALESCE(excluded.won_deciding, won_deciding),
+      tb_played        = COALESCE(excluded.tb_played, tb_played),
+      tb_won           = COALESCE(excluded.tb_won, tb_won),
+      bp_converted     = COALESCE(excluded.bp_converted, bp_converted),
+      bp_opportunities = COALESCE(excluded.bp_opportunities, bp_opportunities),
+      source           = COALESCE(excluded.source, source)
   `).run(row);
 }
 
@@ -118,12 +144,14 @@ export function getPlayerMatches(teSlug: string, opts: {
   surface?: string;
   limit?: number;
   season?: number;
+  since?: string;   // YYYY-MM-DD — filtro de fecha mínima
 } = {}): MatchStatRow[] {
   const db = getDb();
   let sql = "SELECT * FROM player_match_stats WHERE te_slug = ?";
   const args: (string | number)[] = [teSlug];
   if (opts.surface) { sql += " AND surface = ?"; args.push(opts.surface); }
-  if (opts.season) { sql += " AND match_date LIKE ?"; args.push(`${opts.season}%`); }
+  if (opts.season)  { sql += " AND match_date LIKE ?"; args.push(`${opts.season}%`); }
+  if (opts.since)   { sql += " AND match_date >= ?"; args.push(opts.since); }
   sql += " ORDER BY match_date DESC";
   if (opts.limit) { sql += " LIMIT ?"; args.push(opts.limit); }
   return db.prepare(sql).all(...args) as MatchStatRow[];

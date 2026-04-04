@@ -1,8 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(curl -s 'https://www.atptour.com/en/rankings/singles?rankDate=2026-03-31&rankRange=1-250' -H 'User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 Chrome/124.0 Safari/537.36' -H 'Accept: text/html' -H 'Referer: https://www.google.com/')",
-      "Bash(grep -oP '/en/players/\\\\K[^/]+/[a-z0-9]{2,6}\\(?=/overview\\)')"
+      "Bash(*)"
     ]
   }
 }
