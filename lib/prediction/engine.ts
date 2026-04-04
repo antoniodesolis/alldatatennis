@@ -26,6 +26,9 @@ import { canonicalSlug } from "../analytics/player-resolver";
 import { getCalibration } from "../learning/feedback";
 import { computePlayerConfidence, adjustProbabilityForConfidence } from "../analytics/player-confidence";
 import type { PlayerConfidence } from "../analytics/player-confidence";
+import { analyzeMatchup } from "../analytics/matchup-intelligence";
+import { generateNarrative } from "../analytics/narrative";
+import type { TacticalAnalysis } from "../analytics/narrative";
 
 // ── Constants ─────────────────────────────────────────────
 
@@ -106,6 +109,7 @@ export interface PredictionResult {
     p2: PlayerConfidence;
     adjustmentNote: string;
   };
+  tacticalAnalysis?: TacticalAnalysis;
 }
 
 // ── Tournament geo map ────────────────────────────────────
@@ -980,6 +984,40 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
   // ── 12. Razón principal ────────────────────────────────────
   const mainReason = buildMainReason(allFactors, input.player1Name, input.player2Name, winPct1);
 
+  // ── 13. Análisis táctico experto ─────────────────────────
+  const matchup = analyzeMatchup(p1, p2, pat1, pat2, {
+    surface: input.surface,
+    tourneyLevel: input.tourneyLevel,
+    tournament: input.tournament,
+    weather: weather ? { temp: weather.temp, windSpeed: weather.windSpeed, humidity: weather.humidity, effect: weather.effect } : undefined,
+    p1RankEstimated,
+    p2RankEstimated,
+    isIndoor: input.indoor,
+  });
+
+  const topFactor = allFactors
+    .filter((f) => f.hasData && f.effectiveWeight > 0)
+    .sort((a, b) => (b.magnitude * b.effectiveWeight) - (a.magnitude * a.effectiveWeight))[0];
+
+  const tacticalAnalysis = generateNarrative({
+    p1Name: input.player1Name,
+    p2Name: input.player2Name,
+    p1Slug: p1,
+    p2Slug: p2,
+    tournament: input.tournament,
+    tourneyLevel: input.tourneyLevel,
+    surface: input.surface,
+    winPct1,
+    winPct2,
+    recentForm1: form1,
+    recentForm2: form2,
+    h2h,
+    p1Patterns: pat1,
+    p2Patterns: pat2,
+    matchup,
+    mainFactor: topFactor?.id,
+  });
+
   return {
     player1: { slug: p1, name: input.player1Name, winPct: winPct1 },
     player2: { slug: p2, name: input.player2Name, winPct: winPct2 },
@@ -997,5 +1035,6 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
       p2: conf2,
       adjustmentNote: confAdjResult.adjustmentNote,
     },
+    tacticalAnalysis,
   };
 }

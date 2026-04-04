@@ -272,6 +272,15 @@ export default function Home() {
         .score-str{font-family:'Space Mono',monospace;font-size:11px;color:var(--acid);letter-spacing:0.05em;}
         .pred-result-ok{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;padding:2px 7px;border-radius:4px;background:rgba(200,241,53,0.12);color:var(--acid);border:1px solid rgba(200,241,53,0.25);}
         .pred-result-ko{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;padding:2px 7px;border-radius:4px;background:rgba(255,100,100,0.1);color:#ff8080;border:1px solid rgba(255,100,100,0.2);}
+        .narrative-block{padding:16px 18px;border-radius:12px;background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.06);margin-bottom:20px;}
+        .narrative-para{font-family:'DM Sans',sans-serif;font-size:13px;line-height:1.7;color:rgba(255,255,255,0.75);}
+        .narrative-para+.narrative-para{margin-top:10px;}
+        .narrative-label{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:var(--acid);margin-bottom:8px;}
+        .weapon-tag{display:inline-block;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:0.08em;padding:2px 7px;border-radius:4px;background:rgba(200,241,53,0.1);color:var(--acid);border:1px solid rgba(200,241,53,0.2);margin-right:6px;margin-bottom:4px;}
+        .conf-tag{display:inline-block;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:0.08em;padding:2px 7px;border-radius:4px;margin-right:6px;}
+        .conf-alta{background:rgba(200,241,53,0.1);color:var(--acid);border:1px solid rgba(200,241,53,0.2);}
+        .conf-moderada{background:rgba(255,180,0,0.08);color:#f5a623;border:1px solid rgba(255,180,0,0.2);}
+        .conf-baja{background:rgba(255,100,100,0.08);color:#ff8080;border:1px solid rgba(255,100,100,0.18);}
       `}</style>
 
       <div className="noise" />
@@ -505,6 +514,30 @@ export default function Home() {
                                 </div>
                               </div>
                             </div>
+
+                            {/* Análisis táctico experto */}
+                            {pred.tacticalAnalysis && (
+                              <div className="narrative-block">
+                                <div className="narrative-label">Análisis del partido</div>
+                                <div className="mb-2 flex flex-wrap gap-1">
+                                  {pred.tacticalAnalysis.keyWeapon && (
+                                    <span className="weapon-tag">⚡ {pred.tacticalAnalysis.keyWeapon.split(" — ")[0].split("(")[0].trim().slice(0, 60)}</span>
+                                  )}
+                                  <span className={`conf-tag conf-${pred.tacticalAnalysis.confidence}`}>
+                                    Análisis {pred.tacticalAnalysis.confidence} confianza
+                                  </span>
+                                </div>
+                                {pred.tacticalAnalysis.narrative.split("\n\n").map((para, i) => (
+                                  <p key={i} className="narrative-para">{para}</p>
+                                ))}
+                                {pred.tacticalAnalysis.riskFactor && (
+                                  <div className="mt-3 flex gap-2 items-start px-2 py-2 rounded-lg" style={{ background: "rgba(255,180,0,0.05)", border: "1px solid rgba(255,180,0,0.12)" }}>
+                                    <span className="fm text-[9px]" style={{ color: "#f5a623", marginTop: 2 }}>RIESGO</span>
+                                    <span className="fb text-[11px] leading-snug" style={{ color: "rgba(255,255,255,0.5)" }}>{pred.tacticalAnalysis.riskFactor}</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
 
                             {/* Resultado real vs predicción */}
                             {isFinished && m.winner && (
