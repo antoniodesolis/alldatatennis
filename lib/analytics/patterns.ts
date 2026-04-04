@@ -29,7 +29,7 @@ function pct(num: (number | null)[], den: (number | null)[]): number | null {
   return d > 0 ? n / d : null;
 }
 
-function winRateSplit(rows: MatchStatRow[]): { matches: number; winRate: number | null; wins: number; losses: number } {
+function winRateSplit(rows: MatchStatRow[]): SplitStat {
   const wins   = rows.filter((r) => r.result === "W").length;
   const losses = rows.filter((r) => r.result === "L").length;
   const total  = wins + losses;
@@ -65,6 +65,32 @@ export interface OpponentStyleSplits {
   "baseliner": SplitStat;
 }
 
+export interface TbStats {
+  played: number;       // total tiebreaks jugados
+  won: number;          // tiebreaks ganados
+  winRate: number | null;
+}
+
+export interface DecidingSetStats {
+  played: number;       // partidos que llegaron al set decisivo
+  won: number;          // partidos ganados en el set decisivo
+  winRate: number | null;
+}
+
+export interface OpponentRankSplits {
+  top10: SplitStat;
+  top20: SplitStat;
+  top50: SplitStat;
+  top100: SplitStat;
+  rest: SplitStat;
+}
+
+export interface Streaks {
+  current: number;        // positivo = racha ganadora, negativo = racha perdedora
+  longestWin: number;
+  longestLoss: number;
+}
+
 export interface PlayerPatterns {
   slug: string;
   surface: string;
@@ -81,14 +107,27 @@ export interface PlayerPatterns {
   firstServeWonPct: number | null;
   secondServeWonPct: number | null;
   bpSavePct: number | null;
+  // Break points como restador
+  bpConversionPct: number | null;   // bp_converted / bp_opportunities
   // Golpes
   avgWinners: number | null;
   avgUnforced: number | null;
+  // Duración media
+  avgDuration: number | null;
   // Splits contextuales
   surfaceSplits?: Record<string, SplitStat>;
   durationSplits?: DurationSplits;
   timeOfDaySplits?: TimeOfDaySplits;
   opponentStyleSplits?: OpponentStyleSplits;
+  // Nuevos splits
+  roundSplits?: Record<string, SplitStat>;          // R128/R64/.../F
+  levelSplits?: Record<string, SplitStat>;          // grand-slam/masters-1000/...
+  indoorSplits?: { indoor: SplitStat; outdoor: SplitStat };
+  tbStats?: TbStats;
+  thirdSetStats?: DecidingSetStats;                 // best_of=3 que llegaron al 3er set
+  fifthSetStats?: DecidingSetStats;                 // best_of=5 que llegaron al 5o set
+  opponentRankSplits?: OpponentRankSplits;
+  streaks?: Streaks;
   // Forma reciente (últimos 10)
   recentForm?: string[];
 }
@@ -157,6 +196,123 @@ function computeFromRows(rows: MatchStatRow[], teSlug: string, surface: string, 
     "baseliner":            winRateSplit(byStyle["baseliner"]),
   };
 
+  // ── Round splits ──────────────────────────────────────────
+  const roundOrder = ["R128", "R64", "R32", "R16", "QF", "SF", "F", "RR", "BR"];
+  const byRound: Record<string, MatchStatRow[]> = {};
+  for (const r of limited) {
+    const rnd = r.round ?? "unknown";
+    if (!byRound[rnd]) byRound[rnd] = [];
+    byRound[rnd].push(r);
+  }
+  const roundSplits: Record<string, SplitStat> = {};
+  for (const rnd of [...roundOrder, ...Object.keys(byRound).filter((k) => !roundOrder.includes(k))]) {
+    if (byRound[rnd]?.length) roundSplits[rnd] = winRateSplit(byRound[rnd]);
+  }
+
+  // ── Level splits ──────────────────────────────────────────
+  const levelOrder = ["grand-slam", "masters-1000", "atp-500", "atp-250", "atp-finals", "other"];
+  const byLevel: Record<string, MatchStatRow[]> = {};
+  for (const r of limited) {
+    const lvl = r.tourney_level ?? "other";
+    if (!byLevel[lvl]) byLevel[lvl] = [];
+    byLevel[lvl].push(r);
+  }
+  const levelSplits: Record<string, SplitStat> = {};
+  for (const lvl of [...levelOrder, ...Object.keys(byLevel).filter((k) => !levelOrder.includes(k))]) {
+    if (byLevel[lvl]?.length) levelSplits[lvl] = winRateSplit(byLevel[lvl]);
+  }
+
+  // ── Indoor splits ─────────────────────────────────────────
+  const indoorRows   = limited.filter((r) => r.indoor === 1);
+  const outdoorRows  = limited.filter((r) => r.indoor === 0);
+  const indoorSplits = { indoor: winRateSplit(indoorRows), outdoor: winRateSplit(outdoorRows) };
+
+  // ── Tiebreak stats ────────────────────────────────────────
+  let tbPlayed = 0, tbWon = 0;
+  for (const r of limited) {
+    if (r.tb_played != null) tbPlayed += r.tb_played;
+    if (r.tb_won   != null) tbWon   += r.tb_won;
+  }
+  const tbStats: TbStats = {
+    played: tbPlayed,
+    won: tbWon,
+    winRate: tbPlayed > 0 ? tbWon / tbPlayed : null,
+  };
+
+  // ── 3rd / 5th set stats ───────────────────────────────────
+  const bestOf3Rows = limited.filter((r) => r.best_of === 3);
+  const bestOf5Rows = limited.filter((r) => r.best_of === 5);
+
+  const thirdSetRows = bestOf3Rows.filter((r) => r.sets_played === 3);
+  const fifthSetRows = bestOf5Rows.filter((r) => r.sets_played != null && r.sets_played >= 4);
+
+  const thirdSetStats: DecidingSetStats = {
+    played: thirdSetRows.length,
+    won: thirdSetRows.filter((r) => r.result === "W").length,
+    winRate: thirdSetRows.length > 0
+      ? thirdSetRows.filter((r) => r.result === "W").length / thirdSetRows.length
+      : null,
+  };
+
+  const fifthSetStats: DecidingSetStats = {
+    played: fifthSetRows.length,
+    won: fifthSetRows.filter((r) => r.result === "W").length,
+    winRate: fifthSetRows.length > 0
+      ? fifthSetRows.filter((r) => r.result === "W").length / fifthSetRows.length
+      : null,
+  };
+
+  // ── Opponent rank splits ──────────────────────────────────
+  function rankBucket(rows: MatchStatRow[], maxRank: number): MatchStatRow[] {
+    return rows.filter((r) => r.opponent_rank != null && r.opponent_rank <= maxRank);
+  }
+  const top10  = rankBucket(limited, 10);
+  const top20  = rankBucket(limited, 20);
+  const top50  = rankBucket(limited, 50);
+  const top100 = rankBucket(limited, 100);
+  const rest   = limited.filter((r) => r.opponent_rank == null || r.opponent_rank > 100);
+  const opponentRankSplits: OpponentRankSplits = {
+    top10:  winRateSplit(top10),
+    top20:  winRateSplit(top20),
+    top50:  winRateSplit(top50),
+    top100: winRateSplit(top100),
+    rest:   winRateSplit(rest),
+  };
+
+  // ── Streaks ───────────────────────────────────────────────
+  // limited is sorted DESC by date — compute from newest to oldest
+  let currentStreak = 0;
+  let longestWin = 0, longestLoss = 0;
+  let curWin = 0, curLoss = 0;
+  for (const r of [...limited].reverse()) {
+    // oldest-first for streak tracking
+    if (r.result === "W") {
+      curWin++; curLoss = 0;
+      if (curWin > longestWin) longestWin = curWin;
+    } else if (r.result === "L") {
+      curLoss++; curWin = 0;
+      if (curLoss > longestLoss) longestLoss = curLoss;
+    }
+  }
+  // current streak from the most recent matches
+  let i = 0;
+  const first = limited[0]?.result;
+  if (first === "W") {
+    while (i < limited.length && limited[i].result === "W") { currentStreak++; i++; }
+  } else if (first === "L") {
+    while (i < limited.length && limited[i].result === "L") { currentStreak--; i++; }
+  }
+  const streaks: Streaks = { current: currentStreak, longestWin, longestLoss };
+
+  // ── BP conversion as returner ─────────────────────────────
+  const bpConversionPct = pct(
+    limited.map((r) => r.bp_converted),
+    limited.map((r) => r.bp_opportunities)
+  );
+
+  // ── Avg duration ─────────────────────────────────────────
+  const avgDuration = avg(limited.map((r) => r.duration_min));
+
   return {
     slug: teSlug,
     surface,
@@ -173,13 +329,23 @@ function computeFromRows(rows: MatchStatRow[], teSlug: string, surface: string, 
       limited.map((r) => r.second_won),
       limited.map((r) => (r.serve_pts !== null && r.first_in !== null ? r.serve_pts - r.first_in : null))
     ),
-    bpSavePct:   pct(limited.map((r) => r.bp_saved), limited.map((r) => r.bp_faced)),
-    avgWinners:  avg(limited.map((r) => r.winners)),
-    avgUnforced: avg(limited.map((r) => r.unforced_errors)),
+    bpSavePct:      pct(limited.map((r) => r.bp_saved), limited.map((r) => r.bp_faced)),
+    bpConversionPct,
+    avgWinners:     avg(limited.map((r) => r.winners)),
+    avgUnforced:    avg(limited.map((r) => r.unforced_errors)),
+    avgDuration,
     surfaceSplits,
     durationSplits,
     timeOfDaySplits,
     opponentStyleSplits,
+    roundSplits,
+    levelSplits,
+    indoorSplits,
+    tbStats,
+    thirdSetStats,
+    fifthSetStats,
+    opponentRankSplits,
+    streaks,
     recentForm,
   };
 }
@@ -199,7 +365,7 @@ export async function getPlayerPatterns(
     return deserializePattern(cached);
   }
 
-  const rows = getPlayerMatches(teSlug, { surface: surface || undefined, limit: windowN + 50 });
+  const rows = getPlayerMatches(teSlug, { surface: surface || undefined, limit: windowN + 100 });
   if (rows.length === 0) return null;
 
   const result = computeFromRows(rows, teSlug, surface, windowN);
@@ -224,6 +390,18 @@ export async function getPlayerPatterns(
       durationSplits: result.durationSplits,
       timeOfDaySplits: result.timeOfDaySplits,
       opponentStyleSplits: result.opponentStyleSplits,
+      roundSplits: result.roundSplits,
+      levelSplits: result.levelSplits,
+      indoorSplits: result.indoorSplits,
+      tbStats: result.tbStats,
+      thirdSetStats: result.thirdSetStats,
+      fifthSetStats: result.fifthSetStats,
+      opponentRankSplits: result.opponentRankSplits,
+      streaks: result.streaks,
+      bpConversionPct: result.bpConversionPct,
+      avgDuration: result.avgDuration,
+      wins: result.wins,
+      losses: result.losses,
       recentForm: result.recentForm,
     }),
   });
@@ -232,13 +410,7 @@ export async function getPlayerPatterns(
 }
 
 function deserializePattern(row: PatternRow): PlayerPatterns {
-  let extra: {
-    surfaceSplits?: Record<string, SplitStat>;
-    durationSplits?: DurationSplits;
-    timeOfDaySplits?: TimeOfDaySplits;
-    opponentStyleSplits?: OpponentStyleSplits;
-    recentForm?: string[];
-  } = {};
+  let extra: Partial<PlayerPatterns> = {};
   try { extra = JSON.parse(row.patterns_json ?? "{}"); } catch { /* ignore */ }
 
   return {
@@ -247,8 +419,8 @@ function deserializePattern(row: PatternRow): PlayerPatterns {
     windowN: row.window_n,
     matchesUsed: row.matches_used ?? 0,
     winRate: row.win_rate,
-    wins: 0,
-    losses: 0,
+    wins: (extra.wins as number) ?? 0,
+    losses: (extra.losses as number) ?? 0,
     avgAces: row.avg_aces,
     avgDoubleFaults: row.avg_df,
     firstServePct: row.first_serve_pct,
@@ -257,7 +429,21 @@ function deserializePattern(row: PatternRow): PlayerPatterns {
     bpSavePct: row.bp_save_pct,
     avgWinners: row.avg_winners,
     avgUnforced: row.avg_unforced,
-    ...extra,
+    bpConversionPct: extra.bpConversionPct ?? null,
+    avgDuration: extra.avgDuration ?? null,
+    surfaceSplits: extra.surfaceSplits,
+    durationSplits: extra.durationSplits,
+    timeOfDaySplits: extra.timeOfDaySplits,
+    opponentStyleSplits: extra.opponentStyleSplits,
+    roundSplits: extra.roundSplits,
+    levelSplits: extra.levelSplits,
+    indoorSplits: extra.indoorSplits,
+    tbStats: extra.tbStats,
+    thirdSetStats: extra.thirdSetStats,
+    fifthSetStats: extra.fifthSetStats,
+    opponentRankSplits: extra.opponentRankSplits,
+    streaks: extra.streaks,
+    recentForm: extra.recentForm,
   };
 }
 
