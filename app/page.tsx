@@ -2,6 +2,7 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import type { ATPPlayer } from "./api/rankings/route";
 import type { ATPMatch } from "./api/matches/route";
+import type { PredictionResult, FactorResult } from "../lib/prediction/engine";
 
 // Torneos ATP principales (excluir challengers, UTR, futures)
 function isMainATP(tournament: string) {
@@ -84,6 +85,16 @@ function PlayerPhoto({
   );
 }
 
+// Infiere nivel del torneo a partir del nombre
+function inferTourneyLevel(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.includes("australian open") || lower.includes("roland garros") || lower.includes("wimbledon") || lower.includes("us open")) return "grand-slam";
+  if (lower.includes("masters 1000") || lower.includes("indian wells") || lower.includes("miami") || lower.includes("monte carlo") || lower.includes("madrid") || lower.includes("rome") || lower.includes("canada") || lower.includes("cincinnati") || lower.includes("shanghai") || lower.includes("paris masters")) return "masters-1000";
+  if (lower.includes("500") || lower.includes("dubai") || lower.includes("acapulco") || lower.includes("rotterdam") || lower.includes("barcelona") || lower.includes("hamburg") || lower.includes("washington") || lower.includes("vienna") || lower.includes("beijing") || lower.includes("tokyo")) return "atp-500";
+  if (lower.includes("finals") || lower.includes("nitto")) return "atp-finals";
+  return "atp-250";
+}
+
 export default function Home() {
   const carouselRef = useRef<HTMLDivElement>(null);
   const [players, setPlayers] = useState<ATPPlayer[]>([]);
@@ -93,6 +104,46 @@ export default function Home() {
   const [matchesLoading, setMatchesLoading] = useState(true);
   // Map: lastName(lower) → photo URL — construido desde el ranking top 100
   const [rankingMap, setRankingMap] = useState<Map<string, string>>(new Map());
+
+  // Predicción
+  const [expandedMatch, setExpandedMatch] = useState<string | null>(null);
+  const [predictions, setPredictions] = useState<Record<string, PredictionResult>>({});
+  const [loadingPred, setLoadingPred] = useState<Record<string, boolean>>({});
+
+  const fetchPrediction = useCallback(async (m: ATPMatch) => {
+    if (predictions[m.id] || loadingPred[m.id]) return;
+    setLoadingPred((prev) => ({ ...prev, [m.id]: true }));
+    try {
+      const res = await fetch("/api/prediction", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          matchId: m.id,
+          player1: m.player1Slug,
+          player2: m.player2Slug,
+          player1Name: m.player1,
+          player2Name: m.player2,
+          tournament: m.tournament,
+          tourneyLevel: inferTourneyLevel(m.tournament),
+          surface: m.surface ?? "hard",
+          timeOfDay: undefined,
+          date: new Date().toISOString().slice(0, 10),
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json() as PredictionResult;
+        setPredictions((prev) => ({ ...prev, [m.id]: data }));
+      }
+    } catch { /* ignore */ } finally {
+      setLoadingPred((prev) => ({ ...prev, [m.id]: false }));
+    }
+  }, [predictions, loadingPred]);
+
+  const handleMatchClick = useCallback((m: ATPMatch) => {
+    const isExpanding = expandedMatch !== m.id;
+    setExpandedMatch(isExpanding ? m.id : null);
+    if (isExpanding) fetchPrediction(m);
+  }, [expandedMatch, fetchPrediction]);
 
   const buildRankingMap = useCallback((ps: ATPPlayer[]) => {
     const m = new Map<string, string>();
@@ -168,7 +219,20 @@ export default function Home() {
         .scroll-btn:hover{border-color:var(--acid);color:var(--acid);}
 
         .match-card{background:var(--bg2);border:1px solid var(--border);border-radius:16px;transition:all 0.3s;overflow:hidden;cursor:pointer;}
-        .match-card:hover{border-color:rgba(200,241,53,0.25);transform:translateY(-2px);box-shadow:0 8px 40px rgba(0,0,0,0.5);}
+        .match-card:hover{border-color:rgba(200,241,53,0.25);box-shadow:0 8px 40px rgba(0,0,0,0.5);}
+        .match-card.expanded{border-color:rgba(200,241,53,0.4);}
+        .pred-panel{background:var(--bg3);border-top:1px solid var(--border);padding:20px 24px;}
+        .prob-bar-wrap{display:flex;align-items:center;gap:0;border-radius:8px;overflow:hidden;height:36px;}
+        .prob-bar-p1{background:linear-gradient(90deg,var(--acid),#9ab82a);display:flex;align-items:center;justify-content:flex-start;padding:0 12px;transition:width 0.6s ease;}
+        .prob-bar-p2{background:rgba(255,255,255,0.12);display:flex;align-items:center;justify-content:flex-end;padding:0 12px;transition:width 0.6s ease;}
+        .factor-row{display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);}
+        .factor-row:last-child{border-bottom:none;}
+        .adv-badge{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;padding:2px 7px;border-radius:4px;white-space:nowrap;flex-shrink:0;}
+        .adv-p1{background:rgba(200,241,53,0.15);color:var(--acid);border:1px solid rgba(200,241,53,0.25);}
+        .adv-p2{background:rgba(255,100,100,0.12);color:#ff8080;border:1px solid rgba(255,100,100,0.2);}
+        .adv-n{background:rgba(255,255,255,0.05);color:var(--muted);border:1px solid rgba(255,255,255,0.08);}
+        @keyframes fadeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+        .pred-panel{animation:fadeIn 0.25s ease;}
         .avatar{width:52px;height:52px;border-radius:50%;object-fit:cover;object-position:top;background:var(--bg3);border:2px solid var(--border);flex-shrink:0;}
         .bar-track{background:rgba(255,255,255,0.08);border-radius:999px;height:5px;overflow:hidden;}
         .bar-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--acid),#9ab82a);}
@@ -306,10 +370,21 @@ export default function Home() {
                 const surfLabel = SURFACE_ES[m.surface] ?? m.surface;
                 const isFinished = m.status === "finished";
                 const isLive = m.status === "live";
-                return (
-                  <div key={m.id} className="match-card" style={{ opacity: isFinished ? 0.6 : 1 }}>
-                    <div className="p-5 flex flex-wrap items-center gap-4">
+                const isExpanded = expandedMatch === m.id;
+                const pred = predictions[m.id];
+                const isLoadingPred = loadingPred[m.id];
 
+                return (
+                  <div
+                    key={m.id}
+                    className={`match-card${isExpanded ? " expanded" : ""}`}
+                    style={{ opacity: isFinished ? 0.75 : 1 }}
+                  >
+                    {/* Fila principal — clickable */}
+                    <div
+                      className="p-5 flex flex-wrap items-center gap-4"
+                      onClick={() => handleMatchClick(m)}
+                    >
                       {/* Hora + estado */}
                       <div className="flex flex-col items-center" style={{ minWidth: 48 }}>
                         <span className="fd text-2xl" style={{ color: isLive ? "#c8f135" : isFinished ? "var(--muted)" : "white", lineHeight: 1 }}>
@@ -320,12 +395,12 @@ export default function Home() {
                       </div>
 
                       {/* Jugadores */}
-                      <a href={`/player/${m.player1Slug}`} style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit", minWidth: 0 }}>
+                      <a href={`/player/${m.player1Slug}`} onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit", minWidth: 0 }}>
                         <PlayerPhoto name={m.player1} slug={m.player1Slug} rankingMap={rankingMap} size={52} />
                         <div className="fb font-semibold text-base leading-tight">{m.player1}</div>
                       </a>
                       <div className="fm text-[10px]" style={{ color: "var(--muted)", flexShrink: 0 }}>VS</div>
-                      <a href={`/player/${m.player2Slug}`} style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit", minWidth: 0 }}>
+                      <a href={`/player/${m.player2Slug}`} onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit", minWidth: 0 }}>
                         <PlayerPhoto name={m.player2} slug={m.player2Slug} rankingMap={rankingMap} size={52} style={{ opacity: 0.75 }} />
                         <div className="fb font-semibold text-base leading-tight" style={{ color: "rgba(255,255,255,0.6)" }}>{m.player2}</div>
                       </a>
@@ -334,13 +409,128 @@ export default function Home() {
                       <div className="flex flex-wrap gap-2 items-center ml-auto">
                         <span className="tag tag-g">{m.tournament}</span>
                         {m.round && <span className="tag tag-g">{m.round}</span>}
-                        <span className="tag" style={{
-                          background: `${surfColor}22`,
-                          color: surfColor,
-                          borderColor: `${surfColor}44`,
-                        }}>{surfLabel}</span>
+                        <span className="tag" style={{ background: `${surfColor}22`, color: surfColor, borderColor: `${surfColor}44` }}>{surfLabel}</span>
+                        <span className="fm text-[9px]" style={{ color: "var(--muted)" }}>{isExpanded ? "▲" : "▼"}</span>
                       </div>
                     </div>
+
+                    {/* Panel de predicción (expandible) */}
+                    {isExpanded && (
+                      <div className="pred-panel">
+                        {isLoadingPred && (
+                          <div className="fm text-xs text-center py-4" style={{ color: "var(--muted)" }}>Calculando predicción...</div>
+                        )}
+                        {!isLoadingPred && !pred && (
+                          <div className="fm text-xs text-center py-4" style={{ color: "var(--muted)" }}>No hay datos suficientes para este partido.</div>
+                        )}
+                        {pred && (
+                          <div>
+                            {/* Barra de probabilidad */}
+                            <div className="mb-5">
+                              <div className="flex justify-between mb-2">
+                                <span className="fb font-semibold text-sm">{pred.player1.name}</span>
+                                <span className="fb font-semibold text-sm" style={{ color: "rgba(255,255,255,0.55)" }}>{pred.player2.name}</span>
+                              </div>
+                              <div className="prob-bar-wrap">
+                                <div className="prob-bar-p1 fd text-xl" style={{ width: `${pred.player1.winPct}%`, color: "#080c10" }}>
+                                  {pred.player1.winPct}%
+                                </div>
+                                <div className="prob-bar-p2 fd text-xl" style={{ width: `${pred.player2.winPct}%`, color: "rgba(255,255,255,0.5)" }}>
+                                  {pred.player2.winPct}%
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Meta badges */}
+                            <div className="flex flex-wrap gap-2 mb-5">
+                              {pred.courtModel && (
+                                <span className="tag">CSI {pred.courtModel.speed} · {pred.courtModel.profile}</span>
+                              )}
+                              {pred.h2h.total > 0 && (
+                                <span className="tag tag-g">H2H {pred.h2h.p1Wins}–{pred.h2h.p2Wins}</span>
+                              )}
+                              {pred.weather && (
+                                <span className="tag tag-g" title={pred.weather.effect}>
+                                  🌡 {pred.weather.temp.toFixed(0)}°C · 💨 {pred.weather.windSpeed.toFixed(0)} km/h · 💧 {pred.weather.humidity}%
+                                  {pred.weather.source === "static" && <span style={{ color: "var(--muted)" }}> ·est.</span>}
+                                </span>
+                              )}
+                              <span className="tag tag-g">Confianza {pred.confidence}%</span>
+                            </div>
+
+                            {/* Razón principal */}
+                            {pred.mainReason && (
+                              <div className="mb-5 flex gap-2 items-start px-3 py-2.5 rounded-lg" style={{ background: "rgba(200,241,53,0.06)", border: "1px solid rgba(200,241,53,0.15)" }}>
+                                <div className="insight-dot mt-0.5" />
+                                <span className="fb text-sm leading-snug" style={{ color: "rgba(255,255,255,0.85)" }}>{pred.mainReason}</span>
+                              </div>
+                            )}
+
+                            {/* 3 patrones clave */}
+                            <div className="slabel mb-3">Factores determinantes</div>
+                            <div>
+                              {pred.keyPatterns.map((f: FactorResult) => (
+                                <div key={f.id} className="factor-row">
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <div className="fb text-sm font-medium">{f.label}</div>
+                                      <span className="fm text-[9px]" style={{ color: "var(--muted)" }}>
+                                        {Math.round((f.effectiveWeight ?? f.baseWeight ?? 0) * 100)}%
+                                      </span>
+                                    </div>
+                                    <div className="flex gap-3 flex-wrap">
+                                      <span className="fm text-[11px]" style={{ color: "var(--acid)" }}>{pred.player1.name.split(" ").pop()}: {f.p1Label}</span>
+                                      <span className="fm text-[11px]" style={{ color: "rgba(255,255,255,0.4)" }}>{pred.player2.name.split(" ").pop()}: {f.p2Label}</span>
+                                    </div>
+                                  </div>
+                                  <span className={`adv-badge ${f.winner === "p1" ? "adv-p1" : f.winner === "p2" ? "adv-p2" : "adv-n"}`}>
+                                    {f.winner === "p1" ? `↑ ${pred.player1.name.split(" ").pop()}` : f.winner === "p2" ? `↑ ${pred.player2.name.split(" ").pop()}` : "Par"}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* Todos los factores (desplegable) */}
+                            {pred.allFactors && pred.allFactors.length > 3 && (
+                              <details className="mt-3">
+                                <summary className="fm text-[10px] cursor-pointer" style={{ color: "var(--muted)", letterSpacing: "0.1em", userSelect: "none" }}>
+                                  VER LOS {pred.allFactors.length} FACTORES
+                                </summary>
+                                <div className="mt-2">
+                                  {pred.allFactors.filter((f: FactorResult) => !pred.keyPatterns.find((k: FactorResult) => k.id === f.id)).map((f: FactorResult) => (
+                                    <div key={f.id} className="factor-row" style={{ opacity: f.hasData ? 0.8 : 0.35 }}>
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div className="flex items-center gap-2 mb-1">
+                                          <div className="fb text-xs font-medium">{f.label}</div>
+                                          <span className="fm text-[9px]" style={{ color: "var(--muted)" }}>
+                                            {Math.round((f.effectiveWeight ?? f.baseWeight ?? 0) * 100)}%
+                                            {!f.hasData && " · sin datos"}
+                                          </span>
+                                        </div>
+                                        <div className="flex gap-3 flex-wrap">
+                                          <span className="fm text-[10px]" style={{ color: "rgba(200,241,53,0.7)" }}>{pred.player1.name.split(" ").pop()}: {f.p1Label}</span>
+                                          <span className="fm text-[10px]" style={{ color: "rgba(255,255,255,0.3)" }}>{pred.player2.name.split(" ").pop()}: {f.p2Label}</span>
+                                        </div>
+                                      </div>
+                                      <span className={`adv-badge ${f.winner === "p1" ? "adv-p1" : f.winner === "p2" ? "adv-p2" : "adv-n"}`} style={{ fontSize: "8px" }}>
+                                        {f.winner === "p1" ? `↑ ${pred.player1.name.split(" ").pop()}` : f.winner === "p2" ? `↑ ${pred.player2.name.split(" ").pop()}` : "Par"}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </details>
+                            )}
+
+                            {/* Efecto clima si hay */}
+                            {pred.weather && pred.weather.effect !== "condiciones normales" && (
+                              <div className="mt-4 fm text-[11px] px-3 py-2 rounded-lg" style={{ background: "rgba(255,255,255,0.04)", color: "var(--muted)" }}>
+                                ☁ {pred.weather.effect}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}

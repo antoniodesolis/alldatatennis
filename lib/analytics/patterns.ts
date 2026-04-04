@@ -7,6 +7,7 @@ import { getPlayerMatches, savePattern, getPattern, invalidatePatterns } from ".
 import type { MatchStatRow, PatternRow } from "../db/queries";
 import { classifyMatchLength } from "./player-styles";
 import type { PlayerStyle } from "./player-styles";
+import { canonicalSlug } from "./player-resolver";
 
 const PATTERN_TTL_MS = 30 * 60 * 1000; // 30 min antes de recalcular
 
@@ -100,6 +101,12 @@ export interface PlayerPatterns {
   winRate: number | null;
   wins: number;
   losses: number;
+  /**
+   * Calidad ponderada de victorias: cada resultado se pondera según el ranking del rival.
+   * rank 1-10 → 2.0, 11-25 → 1.5, 26-50 → 1.2, 51-100 → 1.0, >100 → 0.6, null → 0.8
+   * Valor en [0, 1] — mayor que winRate indica victorias contra rivales top.
+   */
+  qualityWinRate: number | null;
   // Servicio
   avgAces: number | null;
   avgDoubleFaults: number | null;
@@ -331,6 +338,25 @@ function computeFromRows(rows: MatchStatRow[], teSlug: string, surface: string, 
   }
   const streaks: Streaks = { current: currentStreak, longestWin, longestLoss };
 
+  // ── Quality-weighted win rate ─────────────────────────────
+  // Weights wins/losses by opponent ranking quality so beating a top-5 counts
+  // more than beating a rank-80 player (as opposed to a raw win %).
+  function opponentQualityWeight(rank: number | null): number {
+    if (rank === null) return 0.8;
+    if (rank <= 10) return 2.0;
+    if (rank <= 25) return 1.5;
+    if (rank <= 50) return 1.2;
+    if (rank <= 100) return 1.0;
+    return 0.6;
+  }
+  let qwNumerator = 0, qwDenominator = 0;
+  for (const r of resultRows) {
+    const w = opponentQualityWeight(r.opponent_rank);
+    qwDenominator += w;
+    if (r.result === "W") qwNumerator += w;
+  }
+  const qualityWinRate = qwDenominator > 0 ? qwNumerator / qwDenominator : null;
+
   // ── BP conversion as returner ─────────────────────────────
   const bpConversionPct = pct(
     resultRows.map((r) => r.bp_converted),
@@ -373,6 +399,7 @@ function computeFromRows(rows: MatchStatRow[], teSlug: string, surface: string, 
     winRate: total > 0 ? wins / total : null,
     wins,
     losses,
+    qualityWinRate,
     avgAces:          avg(serveRows.map((r) => r.aces)),
     avgDoubleFaults:  avg(serveRows.map((r) => r.double_faults)),
     firstServePct:    pct(serveRows.map((r) => r.first_in), serveRows.map((r) => r.serve_pts)),
@@ -428,6 +455,9 @@ export async function getPlayerPatterns(
   surface = "",
   windowN = 30
 ): Promise<PlayerPatterns | null> {
+  // Normalize to canonical slug before any DB access
+  teSlug = canonicalSlug(teSlug);
+
   const cached = getPattern(teSlug, surface, windowN);
   if (cached && cached.computed_at && Date.now() / 1000 - cached.computed_at < PATTERN_TTL_MS / 1000) {
     return deserializePattern(cached);
@@ -464,6 +494,7 @@ export async function getPlayerPatterns(
     avg_winners: result.avgWinners,
     avg_unforced: result.avgUnforced,
     patterns_json: JSON.stringify({
+      qualityWinRate: result.qualityWinRate,
       surfaceSplits: result.surfaceSplits,
       durationSplits: result.durationSplits,
       timeOfDaySplits: result.timeOfDaySplits,
@@ -501,6 +532,7 @@ function deserializePattern(row: PatternRow): PlayerPatterns {
     winRate: row.win_rate,
     wins: (extra.wins as number) ?? 0,
     losses: (extra.losses as number) ?? 0,
+    qualityWinRate: (extra.qualityWinRate as number | null) ?? null,
     avgAces: row.avg_aces,
     avgDoubleFaults: row.avg_df,
     firstServePct: row.first_serve_pct,
@@ -530,5 +562,5 @@ function deserializePattern(row: PatternRow): PlayerPatterns {
 }
 
 export function resetPatterns(teSlug: string) {
-  invalidatePatterns(teSlug);
+  invalidatePatterns(canonicalSlug(teSlug));
 }

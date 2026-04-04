@@ -54,6 +54,41 @@ export function runMigrations() {
       ON player_match_stats(te_slug, surface, match_date DESC);
   `);
 
+  // ── Tablas de aprendizaje automático ─────────────────────
+  db.exec(`
+    -- Log de predicciones: almacena cada predicción hecha + resultado real cuando se conoce
+    CREATE TABLE IF NOT EXISTS prediction_log (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      match_id        TEXT NOT NULL,          -- ID TE del partido
+      match_date      TEXT NOT NULL,          -- YYYY-MM-DD
+      player1_slug    TEXT NOT NULL,
+      player2_slug    TEXT NOT NULL,
+      tournament      TEXT,
+      surface         TEXT,
+      tourney_level   TEXT,
+      predicted_p1_pct REAL NOT NULL,         -- probabilidad predicha para p1 (0-100)
+      actual_winner   TEXT,                   -- "p1" | "p2" | NULL si no resuelto
+      prediction_error REAL,                  -- |predicted_p1_pct/100 - actual_binary|, NULL si no resuelto
+      factors_json    TEXT NOT NULL,          -- JSON con todos los factores y sus pesos/ventajas
+      created_at      INTEGER DEFAULT (unixepoch()),
+      resolved_at     INTEGER,
+      UNIQUE(match_id, player1_slug)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_pred_log_date ON prediction_log(match_date DESC);
+    CREATE INDEX IF NOT EXISTS idx_pred_log_resolved ON prediction_log(resolved_at) WHERE resolved_at IS NULL;
+
+    -- Calibración de factores: ajuste aprendido por factor a partir del historial de errores
+    CREATE TABLE IF NOT EXISTS factor_calibration (
+      factor_id       TEXT PRIMARY KEY,       -- "csi_exact", "recent_form_3m", etc.
+      sample_count    INTEGER DEFAULT 0,      -- nº de predicciones resueltas que usan este factor
+      avg_accuracy    REAL DEFAULT 0.5,       -- 0-1 promedio de aciertos cuando este factor favorece al ganador
+      avg_error       REAL DEFAULT 0.0,       -- error cuadrático medio cuando el factor tiene datos
+      weight_mult     REAL DEFAULT 1.0,       -- multiplicador aprendido (>1 = reforzar, <1 = penalizar)
+      last_updated    INTEGER DEFAULT (unixepoch())
+    );
+  `);
+
   // Migraciones aditivas — ADD COLUMN falla si ya existe, lo ignoramos
   const addCols = [
     "ALTER TABLE player_match_stats ADD COLUMN match_time        TEXT",

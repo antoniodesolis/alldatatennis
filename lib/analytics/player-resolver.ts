@@ -141,6 +141,28 @@ export const ATP_SLUG_MAP: Record<string, string> = {
   uchiyama:"u134", shimizu:"s0aq", zhang:"z371",
 };
 
+// ── Slug canonicalization ────────────────────────────────────
+// Maps te_history/TE slugs (alias) → canonical DB slug (the one with the most
+// historical data, used as the single identifier throughout the app).
+// Reason: TennisExplorer uses compound names (de-minaur) but Sackmann/charting
+// CSVs use short names (minaur). After POST /api/admin/normalize-slugs all DB
+// rows use the canonical slug, so queries must use the canonical form.
+export const SLUG_CANONICAL: Record<string, string> = {
+  "de-minaur":         "minaur",
+  "davidovich-fokina": "fokina",
+  "carabelli":         "ugo-carabelli",
+  // Juan Manuel Cerundolo — no DB data yet; keep as-is
+  "juan-cerundolo":    "cerundolo-jm", // placeholder, no data
+};
+
+/**
+ * Resolves any slug (including TE aliases) to its canonical form.
+ * If no mapping exists, returns the slug unchanged.
+ */
+export function canonicalSlug(slug: string): string {
+  return SLUG_CANONICAL[slug] ?? slug;
+}
+
 // Índice inverso: atpCode → te_slug (primera aparición)
 const codeToSlug = new Map<string, string>();
 for (const [slug, code] of Object.entries(ATP_SLUG_MAP)) {
