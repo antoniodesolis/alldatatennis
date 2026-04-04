@@ -466,6 +466,35 @@ export default function Home() {
                               </div>
                             )}
 
+                            {/* Alertas de confianza por jugador */}
+                            {pred.playerConfidence && (
+                              <>
+                                {pred.playerConfidence.p1.tier !== "high" && (
+                                  <div className="mb-2 flex gap-2 items-start px-3 py-2 rounded-lg" style={{ background: "rgba(255,180,0,0.06)", border: "1px solid rgba(255,180,0,0.18)" }}>
+                                    <span style={{ color: "#f5a623", fontSize: 13, lineHeight: 1.4 }}>⚠</span>
+                                    <span className="fm text-[11px] leading-snug" style={{ color: "rgba(255,255,255,0.65)" }}>
+                                      <span style={{ color: "#f5a623", fontWeight: 600 }}>{pred.player1.name.split(" ").pop()}: </span>
+                                      {pred.playerConfidence.p1.label}
+                                    </span>
+                                  </div>
+                                )}
+                                {pred.playerConfidence.p2.tier !== "high" && (
+                                  <div className="mb-2 flex gap-2 items-start px-3 py-2 rounded-lg" style={{ background: "rgba(255,180,0,0.06)", border: "1px solid rgba(255,180,0,0.18)" }}>
+                                    <span style={{ color: "#f5a623", fontSize: 13, lineHeight: 1.4 }}>⚠</span>
+                                    <span className="fm text-[11px] leading-snug" style={{ color: "rgba(255,255,255,0.65)" }}>
+                                      <span style={{ color: "#f5a623", fontWeight: 600 }}>{pred.player2.name.split(" ").pop()}: </span>
+                                      {pred.playerConfidence.p2.label}
+                                    </span>
+                                  </div>
+                                )}
+                                {pred.playerConfidence.adjustmentNote && (
+                                  <div className="mb-4 px-3 py-2 rounded-lg fm text-[11px]" style={{ background: "rgba(255,255,255,0.03)", color: "var(--muted)" }}>
+                                    {pred.playerConfidence.adjustmentNote}
+                                  </div>
+                                )}
+                              </>
+                            )}
+
                             {/* 3 patrones clave */}
                             <div className="slabel mb-3">Factores determinantes</div>
                             <div>

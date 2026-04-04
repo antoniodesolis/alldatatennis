@@ -24,6 +24,8 @@ import { getTournamentCourtModel } from "../analytics/court-speed";
 import { getDb } from "../db/client";
 import { canonicalSlug } from "../analytics/player-resolver";
 import { getCalibration } from "../learning/feedback";
+import { computePlayerConfidence, adjustProbabilityForConfidence } from "../analytics/player-confidence";
+import type { PlayerConfidence } from "../analytics/player-confidence";
 
 // ── Constants ─────────────────────────────────────────────
 
@@ -99,6 +101,11 @@ export interface PredictionResult {
   confidence: number;
   courtModel?: { speed: number; profile: string; name: string };
   mainReason: string;            // frase principal del pronóstico
+  playerConfidence?: {
+    p1: PlayerConfidence;
+    p2: PlayerConfidence;
+    adjustmentNote: string;
+  };
 }
 
 // ── Tournament geo map ────────────────────────────────────
@@ -539,6 +546,10 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
   const daysRest1 = p1LastMatch ? Math.round((new Date(today).getTime() - new Date(p1LastMatch).getTime()) / 86400000) : null;
   const daysRest2 = p2LastMatch ? Math.round((new Date(today).getTime() - new Date(p2LastMatch).getTime()) / 86400000) : null;
 
+  // ── 5b. Confianza estadística por jugador ─────────────────
+  const conf1 = computePlayerConfidence(p1);
+  const conf2 = computePlayerConfidence(p2);
+
   // ── 6. Construir los 10 factores ──────────────────────────
 
   const rawFactors: Array<Omit<FactorResult, "baseWeight" | "effectiveWeight">> = [];
@@ -929,7 +940,13 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
   }, 0);
 
   const p1Prob = sigmoid(totalLogit);
-  let winPct1 = Math.round(p1Prob * 100);
+
+  // ── 8b. Ajustar probabilidad si hay baja confianza ────────
+  const confAdjResult = adjustProbabilityForConfidence(
+    p1Prob, conf1, conf2, p1RankEstimated, p2RankEstimated,
+  );
+  const finalProb = confAdjResult.wasAdjusted ? confAdjResult.adjustedProb : p1Prob;
+  let winPct1 = Math.round(finalProb * 100);
   winPct1 = clamp(winPct1, 5, 95);
   const winPct2 = 100 - winPct1;
 
@@ -975,5 +992,10 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
       ? { speed: courtModel.court_speed, profile: courtModel.court_profile, name: courtModel.tourney_name }
       : undefined,
     mainReason,
+    playerConfidence: {
+      p1: conf1,
+      p2: conf2,
+      adjustmentNote: confAdjResult.adjustmentNote,
+    },
   };
 }
