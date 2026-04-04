@@ -44,6 +44,7 @@ export interface MatchStatRow {
   tb_won: number | null;
   bp_converted: number | null;    // BPs convertidos como restador
   bp_opportunities: number | null; // BPs totales como restador
+  court_speed: number | null;      // 0-100 índice de velocidad de pista
   source: string | null;
 }
 
@@ -96,7 +97,7 @@ export function upsertMatchStat(row: Omit<MatchStatRow, "id">) {
        winners, unforced_errors, match_time, time_of_day, opponent_style,
        best_of, tourney_level, indoor, opponent_rank,
        sets_played, won_deciding, tb_played, tb_won, bp_converted, bp_opportunities,
-       source)
+       court_speed, source)
     VALUES
       (@te_slug, @te_match_id, @match_date, @tournament, @surface, @round,
        @opponent_slug, @result, @score, @duration_min,
@@ -105,7 +106,7 @@ export function upsertMatchStat(row: Omit<MatchStatRow, "id">) {
        @winners, @unforced_errors, @match_time, @time_of_day, @opponent_style,
        @best_of, @tourney_level, @indoor, @opponent_rank,
        @sets_played, @won_deciding, @tb_played, @tb_won, @bp_converted, @bp_opportunities,
-       @source)
+       @court_speed, @source)
     ON CONFLICT(te_slug, te_match_id) DO UPDATE SET
       surface          = COALESCE(excluded.surface, surface),
       round            = COALESCE(excluded.round, round),
@@ -136,6 +137,7 @@ export function upsertMatchStat(row: Omit<MatchStatRow, "id">) {
       tb_won           = COALESCE(excluded.tb_won, tb_won),
       bp_converted     = COALESCE(excluded.bp_converted, bp_converted),
       bp_opportunities = COALESCE(excluded.bp_opportunities, bp_opportunities),
+      court_speed      = COALESCE(excluded.court_speed, court_speed),
       source           = COALESCE(excluded.source, source)
   `).run(row);
 }
@@ -217,6 +219,72 @@ export function getPattern(teSlug: string, surface: string, windowN: number): Pa
 
 export function invalidatePatterns(teSlug: string) {
   getDb().prepare("DELETE FROM player_patterns WHERE te_slug = ?").run(teSlug);
+}
+
+// ── Tournament models ──────────────────────────────────────
+
+export interface TournamentModelRow {
+  tourney_name: string;
+  surface: string | null;
+  years: string | null;
+  matches: number | null;
+  ace_rate: number | null;
+  first_in_pct: number | null;
+  first_won_pct: number | null;
+  second_won_pct: number | null;
+  hold_pct: number | null;
+  tiebreak_rate: number | null;
+  avg_duration: number | null;
+  court_speed: number | null;
+  court_profile: string | null;
+  style_affinity: string | null;
+  computed_at: number | null;
+}
+
+export function upsertTournamentModel(row: TournamentModelRow) {
+  getDb().prepare(`
+    INSERT INTO tournament_models
+      (tourney_name, surface, years, matches, ace_rate, first_in_pct, first_won_pct,
+       second_won_pct, hold_pct, tiebreak_rate, avg_duration,
+       court_speed, court_profile, style_affinity, computed_at)
+    VALUES
+      (@tourney_name, @surface, @years, @matches, @ace_rate, @first_in_pct, @first_won_pct,
+       @second_won_pct, @hold_pct, @tiebreak_rate, @avg_duration,
+       @court_speed, @court_profile, @style_affinity, @computed_at)
+    ON CONFLICT(tourney_name) DO UPDATE SET
+      surface        = excluded.surface,
+      years          = excluded.years,
+      matches        = excluded.matches,
+      ace_rate       = excluded.ace_rate,
+      first_in_pct   = excluded.first_in_pct,
+      first_won_pct  = excluded.first_won_pct,
+      second_won_pct = excluded.second_won_pct,
+      hold_pct       = excluded.hold_pct,
+      tiebreak_rate  = excluded.tiebreak_rate,
+      avg_duration   = excluded.avg_duration,
+      court_speed    = excluded.court_speed,
+      court_profile  = excluded.court_profile,
+      style_affinity = excluded.style_affinity,
+      computed_at    = excluded.computed_at
+  `).run(row);
+}
+
+export function getAllTournamentModels(): TournamentModelRow[] {
+  return getDb().prepare(
+    "SELECT * FROM tournament_models ORDER BY court_speed DESC"
+  ).all() as TournamentModelRow[];
+}
+
+export function getTournamentModel(name: string): TournamentModelRow | undefined {
+  return getDb().prepare(
+    "SELECT * FROM tournament_models WHERE tourney_name = ?"
+  ).get(name) as TournamentModelRow | undefined;
+}
+
+export function updateMatchCourtSpeed(tourneyName: string, courtSpeed: number) {
+  getDb().prepare(
+    "UPDATE player_match_stats SET court_speed = ? WHERE tournament = ?"
+  ).run(courtSpeed, tourneyName);
 }
 
 // ── Stats summary ──────────────────────────────────────────

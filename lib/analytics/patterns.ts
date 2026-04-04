@@ -127,6 +127,17 @@ export interface PlayerPatterns {
   thirdSetStats?: DecidingSetStats;                 // best_of=3 que llegaron al 3er set
   fifthSetStats?: DecidingSetStats;                 // best_of=5 que llegaron al 5o set
   opponentRankSplits?: OpponentRankSplits;
+  courtSpeedSplits?: {             // rendimiento por velocidad de pista
+    fast: SplitStat;               // court_speed >= 65
+    mediumFast: SplitStat;         // 45-64
+    medium: SplitStat;             // 25-44
+    slow: SplitStat;               // < 25
+  };
+  courtStats?: Record<string, {    // por torneo individual (tournaments con ≥5 partidos)
+    speed: number;
+    profile: string;
+    split: SplitStat;
+  }>;
   streaks?: Streaks;
   // Forma reciente (últimos 10)
   recentForm?: string[];
@@ -329,6 +340,31 @@ function computeFromRows(rows: MatchStatRow[], teSlug: string, surface: string, 
   // ── Avg duration ─────────────────────────────────────────
   const avgDuration = avg(resultRows.map((r) => r.duration_min));
 
+  // ── Court speed splits ────────────────────────────────────
+  // Usa court_speed propagado desde tournament_models
+  const csRows = resultRows.filter((r) => r.court_speed != null);
+  const courtSpeedSplits = csRows.length >= 3 ? {
+    fast:       winRateSplit(csRows.filter((r) => r.court_speed! >= 65)),
+    mediumFast: winRateSplit(csRows.filter((r) => r.court_speed! >= 45 && r.court_speed! < 65)),
+    medium:     winRateSplit(csRows.filter((r) => r.court_speed! >= 25 && r.court_speed! < 45)),
+    slow:       winRateSplit(csRows.filter((r) => r.court_speed! < 25)),
+  } : undefined;
+
+  // ── Per-tournament stats (torneos con ≥5 resultados) ──────
+  const byTourney: Record<string, MatchStatRow[]> = {};
+  for (const r of resultRows) {
+    if (!r.tournament) continue;
+    if (!byTourney[r.tournament]) byTourney[r.tournament] = [];
+    byTourney[r.tournament].push(r);
+  }
+  const courtStats: Record<string, { speed: number; profile: string; split: SplitStat }> = {};
+  for (const [t, rs] of Object.entries(byTourney)) {
+    if (rs.length < 5) continue;
+    const speed = rs[0].court_speed ?? -1;
+    const profile = speed >= 65 ? "fast" : speed >= 45 ? "medium-fast" : speed >= 25 ? "medium" : speed >= 0 ? "slow" : "unknown";
+    courtStats[t] = { speed, profile, split: winRateSplit(rs) };
+  }
+
   return {
     slug: teSlug,
     surface,
@@ -361,6 +397,8 @@ function computeFromRows(rows: MatchStatRow[], teSlug: string, surface: string, 
     thirdSetStats,
     fifthSetStats,
     opponentRankSplits,
+    courtSpeedSplits,
+    courtStats: Object.keys(courtStats).length > 0 ? courtStats : undefined,
     streaks,
     recentForm,
   };
@@ -437,6 +475,8 @@ export async function getPlayerPatterns(
       thirdSetStats: result.thirdSetStats,
       fifthSetStats: result.fifthSetStats,
       opponentRankSplits: result.opponentRankSplits,
+      courtSpeedSplits: result.courtSpeedSplits,
+      courtStats: result.courtStats,
       streaks: result.streaks,
       bpConversionPct: result.bpConversionPct,
       avgDuration: result.avgDuration,
@@ -482,6 +522,8 @@ function deserializePattern(row: PatternRow): PlayerPatterns {
     thirdSetStats: extra.thirdSetStats,
     fifthSetStats: extra.fifthSetStats,
     opponentRankSplits: extra.opponentRankSplits,
+    courtSpeedSplits: extra.courtSpeedSplits,
+    courtStats: extra.courtStats,
     streaks: extra.streaks,
     recentForm: extra.recentForm,
   };

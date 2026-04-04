@@ -69,6 +69,7 @@ export function runMigrations() {
     "ALTER TABLE player_match_stats ADD COLUMN tb_won            INTEGER",
     "ALTER TABLE player_match_stats ADD COLUMN bp_converted      INTEGER",
     "ALTER TABLE player_match_stats ADD COLUMN bp_opportunities  INTEGER",
+    "ALTER TABLE player_match_stats ADD COLUMN court_speed       REAL",   // 0-100 índice de velocidad de pista
   ];
   for (const sql of addCols) {
     try { db.exec(sql); } catch { /* columna ya existe */ }
@@ -80,6 +81,28 @@ export function runMigrations() {
       te_match_id  TEXT PRIMARY KEY,
       processed_at INTEGER DEFAULT (unixepoch()),
       status       TEXT
+    );
+
+    -- Modelos de velocidad de pista por torneo
+    CREATE TABLE IF NOT EXISTS tournament_models (
+      tourney_name        TEXT PRIMARY KEY,
+      surface             TEXT,
+      years               TEXT,          -- JSON array e.g. [2022,2023,2024]
+      matches             INTEGER,       -- nº de filas usadas para el cálculo
+      -- Métricas brutas (promedios de todos los jugadores en ese torneo)
+      ace_rate            REAL,          -- aces / serve_pts
+      first_in_pct        REAL,          -- first_in / serve_pts
+      first_won_pct       REAL,          -- first_won / first_in
+      second_won_pct      REAL,          -- second_won / (serve_pts - first_in)
+      hold_pct            REAL,          -- 1 - bp_conversion (bp_conv/bp_opp)
+      tiebreak_rate       REAL,          -- tb_played / sets_played
+      avg_duration        REAL,
+      -- Índice derivado
+      court_speed         REAL,          -- 0-100 global (calculado relativo a todos los torneos)
+      court_profile       TEXT,          -- "fast"|"medium-fast"|"medium"|"medium-slow"|"slow"
+      -- Qué estilos favorece (JSON: {style: differential_pp})
+      style_affinity      TEXT,
+      computed_at         INTEGER
     );
 
     -- Caché de patrones computados

@@ -114,7 +114,7 @@ export async function scrapeFinishedMatches(matches: ATPMatch[]): Promise<{ scra
         source: "te_scrape",
         best_of: null, tourney_level: null, indoor: null, opponent_rank: null,
         sets_played: null, won_deciding: null, tb_played: null, tb_won: null,
-        bp_converted: null, bp_opportunities: null,
+        bp_converted: null, bp_opportunities: null, court_speed: null,
       };
 
       upsertMatchStat({

@@ -5,6 +5,7 @@ import type {
   PlayerPatterns, SplitStat, TbStats, DecidingSetStats,
   OpponentRankSplits, Streaks,
 } from "../../../lib/analytics/patterns";
+import type { CourtProfile } from "../../../lib/analytics/court-speed";
 
 // ── Utils ─────────────────────────────────────────────────
 
@@ -452,6 +453,73 @@ export default function PlayerPage() {
                       </div>
                     )}
                   </div>
+                  {/* Court speed splits */}
+                  {all.courtSpeedSplits && (
+                    <div className="card md:col-span-2">
+                      <div className="fb font-semibold text-base mb-1">Rendimiento por velocidad de pista</div>
+                      <div className="fb text-xs mb-4" style={{ color: "var(--muted)" }}>
+                        Basado en el Court Speed Index calculado por torneo (2022-2024). No toda la arcilla es igual — Madrid 42/100, Monte Carlo 21/100, Barcelona 11/100.
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                        {([
+                          { key: "fast",       label: "Rápida",       sub: "≥65",  color: "#e74c3c" },
+                          { key: "mediumFast", label: "Media-rápida", sub: "45-64", color: "#e67e22" },
+                          { key: "medium",     label: "Media",        sub: "25-44", color: "#f5c518" },
+                          { key: "slow",       label: "Lenta",        sub: "<25",   color: "#4a90d9" },
+                        ] as const).map(({ key, label, sub, color }) => {
+                          const split = all.courtSpeedSplits![key];
+                          const wr = split?.winRate;
+                          return (
+                            <div key={key} style={{ background: "var(--bg3)", borderRadius: 12, padding: "14px 16px", border: "1px solid var(--border)" }}>
+                              <div className="flex items-center gap-2 mb-1">
+                                <div style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
+                                <span className="fb text-xs font-semibold">{label}</span>
+                                <span className="fm" style={{ fontSize: 9, color: "var(--muted)" }}>{sub}</span>
+                              </div>
+                              <div className="fd" style={{ fontSize: 32, color: wr != null ? color : "var(--muted)", lineHeight: 1 }}>{pct(wr)}</div>
+                              <div className="fb text-xs mt-1" style={{ color: "var(--muted)" }}>
+                                {split?.matches > 0 ? `${split.wins}V ${split.losses}D (${split.matches}p)` : "sin datos"}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Per-tournament stats */}
+                  {all.courtStats && Object.keys(all.courtStats).length > 0 && (
+                    <div className="card md:col-span-2">
+                      <div className="fb font-semibold text-base mb-1">Win rate por torneo</div>
+                      <div className="fb text-xs mb-4" style={{ color: "var(--muted)" }}>Solo torneos con ≥5 partidos registrados en el período</div>
+                      <div className="grid grid-cols-1 gap-2">
+                        {Object.entries(all.courtStats)
+                          .sort((a, b) => b[1].split.matches - a[1].split.matches)
+                          .map(([name, { speed, profile, split }]) => {
+                            const PROFILE_COLOR: Record<string, string> = {
+                              fast: "#e74c3c", "medium-fast": "#e67e22",
+                              medium: "#f5c518", "medium-slow": "#c8f135", slow: "#4a90d9",
+                            };
+                            const color = PROFILE_COLOR[profile] ?? "#95a5a6";
+                            return (
+                              <div key={name} className="flex items-center gap-3" style={{ background: "var(--bg3)", borderRadius: 8, padding: "10px 14px" }}>
+                                <div style={{ width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0 }} />
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <span className="fb text-sm">{name}</span>
+                                  {speed >= 0 && <span className="fm ml-2" style={{ fontSize: 9, color: "var(--muted)" }}>CSI {speed}</span>}
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  <span className="fb text-xs" style={{ color: "var(--muted)" }}>{split.wins}V-{split.losses}D</span>
+                                  <div className="fd" style={{ fontSize: 20, color: split.winRate != null ? color : "var(--muted)", minWidth: 42, textAlign: "right" }}>
+                                    {pct(split.winRate)}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

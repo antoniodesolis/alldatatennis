@@ -66,7 +66,7 @@ export async function ingestSackmannYear(year: number): Promise<{ inserted: numb
        winners, unforced_errors, match_time, time_of_day, opponent_style,
        best_of, tourney_level, indoor, opponent_rank,
        sets_played, won_deciding, tb_played, tb_won, bp_converted, bp_opportunities,
-       source)
+       court_speed, source)
     VALUES
       (@te_slug, @te_match_id, @match_date, @tournament, @surface, @round,
        @opponent_slug, @result, @score, @duration_min,
@@ -75,7 +75,7 @@ export async function ingestSackmannYear(year: number): Promise<{ inserted: numb
        @winners, @unforced_errors, @match_time, @time_of_day, @opponent_style,
        @best_of, @tourney_level, @indoor, @opponent_rank,
        @sets_played, @won_deciding, @tb_played, @tb_won, @bp_converted, @bp_opportunities,
-       @source)
+       @court_speed, @source)
     ON CONFLICT(te_slug, te_match_id) DO UPDATE SET
       surface          = COALESCE(excluded.surface, surface),
       round            = COALESCE(excluded.round, round),
@@ -101,6 +101,7 @@ export async function ingestSackmannYear(year: number): Promise<{ inserted: numb
       tb_won           = COALESCE(excluded.tb_won, tb_won),
       bp_converted     = COALESCE(excluded.bp_converted, bp_converted),
       bp_opportunities = COALESCE(excluded.bp_opportunities, bp_opportunities),
+      court_speed      = COALESCE(excluded.court_speed, court_speed),
       opponent_style   = COALESCE(excluded.opponent_style, opponent_style),
       source           = COALESCE(excluded.source, source)
   `);
@@ -209,6 +210,7 @@ export async function ingestSackmannYear(year: number): Promise<{ inserted: numb
           tb_won:        wStats?.tbWon ?? null,
           bp_converted:  wBpConverted,
           bp_opportunities: wBpOpportunities,
+          court_speed: null,
         });
         inserted++;
       }
@@ -236,6 +238,7 @@ export async function ingestSackmannYear(year: number): Promise<{ inserted: numb
           tb_won:        lStats?.tbWon ?? null,
           bp_converted:  lBpConverted,
           bp_opportunities: lBpOpportunities,
+          court_speed: null,
         });
         inserted++;
       }
