@@ -168,11 +168,30 @@ function resolveAtpCode(teSlug: string): string | null {
   const cached = slugCache.get(teSlug);
   if (cached) return cached;
 
-  // Normalizar slug TE: "merida-aguilar" → ["merida","aguilar"]
-  const parts = teSlug.split("-").map(normalizePart).filter(Boolean);
+  const slug = teSlug.toLowerCase();
 
-  // 1. Slug completo tal cual (e.g. "davidovich-fokina")
-  let code = LAST[teSlug.toLowerCase()];
+  // 0. TE a veces embebe el código ATP directamente en el slug: "cerundolo-c0c8"
+  //    El código ATP siempre es 4 chars alfanuméricos al final tras un guión.
+  //    Si el penúltimo segmento es un apellido conocido, fiarnos del código embebido.
+  const embeddedM = slug.match(/-([a-z][a-z0-9]{3})$/);
+  if (embeddedM) {
+    const candidateCode = embeddedM[1];
+    const baseSlug = slug.slice(0, slug.length - 5); // quitar "-XXXX"
+    // Solo usar el código embebido si la base sin código coincide con un apellido conocido
+    if (LAST[baseSlug] !== undefined || baseSlug.length >= 4) {
+      // Validar que no sea un apellido normal (los apellidos reales son ≥5 chars o no alfanum puro)
+      if (/^[a-z][a-z0-9]{3}$/.test(candidateCode)) {
+        slugCache.set(teSlug, candidateCode);
+        return candidateCode;
+      }
+    }
+  }
+
+  // Normalizar slug TE: "merida-aguilar" → ["merida","aguilar"]
+  const parts = slug.split("-").map(normalizePart).filter(Boolean);
+
+  // 1. Slug completo tal cual (e.g. "davidovich-fokina", "juan-cerundolo")
+  let code = LAST[slug];
 
   // 2. Última parte (apellido principal): "prizmic", "fokina"
   if (!code && parts.length > 0) code = LAST[parts[parts.length - 1]];

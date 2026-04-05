@@ -51,22 +51,49 @@ function predictionOutcome(
 }
 
 // Hermanos y homónimos: cuando el slug es ambiguo, el nombre del jugador desambigua.
-// Clave: "<apellido_slug>/<inicial_o_nombre_lower>" → slug correcto.
+// Clave: "<apellido>/<inicial_o_nombre>" → slug correcto para la foto y perfil.
+// También cubre slugs con código ATP embebido (cerundolo-c0c8 → juan-cerundolo).
 const SIBLING_SLUG: Record<string, string> = {
   "cerundolo/j":             "juan-cerundolo",
+  "cerundolo/j.m":           "juan-cerundolo",
   "cerundolo/juan":          "juan-cerundolo",
+  "cerundolo/jm":            "juan-cerundolo",
   "cerundolo/f":             "cerundolo",
   "cerundolo/francisco":     "cerundolo",
 };
 
+// Slugs con código ATP embebido → slug canónico
+const ATP_EMBEDDED: Record<string, string> = {
+  "cerundolo-c0c8": "juan-cerundolo",
+  "cerundolo-c0au": "cerundolo",
+};
+
 /** Devuelve el slug correcto teniendo en cuenta posibles hermanos. */
 function resolveSlug(rawSlug: string, playerName: string): string {
-  const lastPart = rawSlug.split("-").pop()?.toLowerCase() ?? rawSlug.toLowerCase();
+  const slugLower = rawSlug.toLowerCase();
+
+  // 0. Slug con código ATP embebido (TE a veces los usa)
+  if (ATP_EMBEDDED[slugLower]) return ATP_EMBEDDED[slugLower];
+
+  // 1. El slug ya es específico (juan-cerundolo, juan-manuel-cerundolo…)
+  if (slugLower.startsWith("juan") && slugLower.includes("cerundolo")) return "juan-cerundolo";
+  if (slugLower.startsWith("francisco") && slugLower.includes("cerundolo")) return "cerundolo";
+
+  // 2. Slug ambiguo → desambiguar por nombre del jugador
+  const lastPart = slugLower.split("-").pop() ?? slugLower;
   const nameParts = playerName.trim().toLowerCase().split(/\s+/);
-  // Primera parte del nombre (inicial o nombre de pila)
-  const firstToken = nameParts[0].replace(/\.$/, ""); // "j." → "j", "juan" → "juan"
+  const firstToken = nameParts[0].replace(/\./g, "").replace(/\s/g, ""); // "j." → "j", "j.m." → "jm"
   const key = `${lastPart}/${firstToken}`;
-  return SIBLING_SLUG[key] ?? rawSlug;
+  if (SIBLING_SLUG[key]) return SIBLING_SLUG[key];
+
+  // 3. Intentar con el segundo token si el primero no resuelve
+  if (nameParts.length > 1) {
+    const secondToken = nameParts[1].replace(/\./g, "");
+    const key2 = `${lastPart}/${secondToken}`;
+    if (SIBLING_SLUG[key2]) return SIBLING_SLUG[key2];
+  }
+
+  return rawSlug;
 }
 
 function lastName(name: string): string {
