@@ -183,9 +183,17 @@ export default function Home() {
   const buildRankingMap = useCallback((ps: ATPPlayer[]) => {
     const m = new Map<string, string>();
     const rn = new Map<string, number>();
+    // Count players per last name to detect siblings (e.g. Cerundolo × 2)
+    const lastCount = new Map<string, number>();
+    for (const p of ps) {
+      const last = p.name.trim().split(/\s+/).pop()!.toLowerCase();
+      lastCount.set(last, (lastCount.get(last) ?? 0) + 1);
+    }
     for (const p of ps) {
       const parts = p.name.trim().split(/\s+/);
       const last = parts[parts.length - 1].toLowerCase();
+      // Skip ambiguous last names — slug-based API handles them correctly
+      if ((lastCount.get(last) ?? 0) > 1) continue;
       m.set(last, p.photo);
       rn.set(last, p.rank);
     }
