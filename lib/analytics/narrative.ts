@@ -307,7 +307,7 @@ function buildOpeningParagraph(
   const favStreak = favIsP1 ? input.p1Streak : input.p2Streak;
   const dogStreak = favIsP1 ? input.p2Streak : input.p1Streak;
 
-  const seed = nameHash(favLast + dogLast);
+  const seed = nameHash(favLast + dogLast + input.tournament + input.surface + (input.round ?? ""));
   const parts: string[] = [];
 
   // ── Apertura principal según tipo de matchup ─────────────
@@ -317,6 +317,9 @@ function buildOpeningParagraph(
       `${rndCtx}${input.tournament} tiene un favorito muy claro: ${favLast} con el ${winPctFav}% de probabilidades sobre ${surf} de ${level}.`,
       `Sobre el papel, ${favLast} lleva la iniciativa en esta ${rnd ?? "ronda"} del ${input.tournament} — ${winPctFav}% frente al ${winPctDog}% de ${dogLast}.`,
       `${rndCtx}${input.tournament}. El modelo ve a ${favLast} como gran favorito (${winPctFav}%) y hay motivos concretos para ello.`,
+      `${favLast} parte con ventaja neta en esta ${rnd ?? "cita"} del ${input.tournament}: ${winPctFav}% de probabilidades sobre ${surf} frente al ${winPctDog}% de ${dogLast}.`,
+      `El análisis del ${input.tournament} señala a ${favLast} como el nombre propio de esta ${rnd ?? "ronda"} — ${winPctFav}% de posibilidades de pasar frente a un ${dogLast} que arranca desde atrás.`,
+      `En ${level} sobre ${surf}, pocas dudas sobre quién es el favorito: ${favLast} (${winPctFav}%) frente a ${dogLast} (${winPctDog}%). La diferencia es real y está respaldada por los datos.`,
     ];
     parts.push(pick(openers, seed));
 
@@ -330,26 +333,31 @@ function buildOpeningParagraph(
 
   } else if (matchupType === "choque-estilos") {
     const stylePairs: Record<string, string> = {
-      "big-server":           "servicio como arma letal",
-      "counter-puncher":      "defensa sólida y contraataque",
-      "aggressive-baseliner": "juego ofensivo desde el fondo",
-      "serve-and-volley":     "red y presión constante",
-      "baseliner":            "consistencia desde el fondo",
-      "all-court":            "juego completo y adaptable",
+      "big-server":           "el servicio como arma",
+      "counter-puncher":      "la defensa y el contraataque",
+      "aggressive-baseliner": "el juego ofensivo desde el fondo",
+      "serve-and-volley":     "la red y la presión constante",
+      "defensive-baseliner":  "la consistencia y la espera",
+      "all-court":            "el juego adaptable en todas las zonas",
     };
     const favStyle = stylePairs[favProfile.style] ?? favProfile.style;
     const dogStyle = stylePairs[dogProfile.style] ?? dogProfile.style;
     const openers = [
       `${rndCtx}${input.tournament} — ${level} sobre ${surf}. Dos filosofías distintas se enfrentan: ${favLast} con ${favStyle}, ${dogLast} con ${dogStyle}. Quien imponga su modelo de juego desde el inicio tiene mucho ganado.`,
       `Un choque de estilos en ${rndCtx.toLowerCase() || ""}${input.tournament}: ${favLast} (${favStyle}) contra ${dogLast} (${dogStyle}) en ${surf} de ${level}. La pregunta no es solo quién juega mejor, sino quién dicta los términos del partido.`,
+      `${favLast} y ${dogLast} representan dos maneras opuestas de entender el tenis: ${favStyle} versus ${dogStyle}. En ${surf} de ${input.tournament}, ese contraste es el primer elemento a analizar.`,
+      `El ${level} de ${input.tournament} enfrenta dos estilos que raramente se neutralizan — ${favLast} con ${favStyle} frente a ${dogLast} y ${dogStyle}. La superficie será árbitro de quién tiene razón hoy.`,
     ];
     parts.push(pick(openers, seed));
 
   } else if (matchupType === "test-mental") {
     const matchesCtx = winsNeeded != null ? `${winsNeeded} victorias para llegar aquí` : "partidos duros para llegar";
+    const margen = winPctFav - winPctDog;
     const openers = [
       `${rndCtx}${input.tournament} — uno de esos partidos que se deciden tanto en la cabeza como en la pista. ${favLast} (${winPctFav}%) y ${dogLast} (${winPctDog}%) llegan muy igualados, y en ${level} sobre ${surf} eso significa que los momentos de presión lo decidirán todo.`,
-      `${cap(rnd ?? "esta ronda")} del ${input.tournament}: ${level} sobre ${surf}, con dos jugadores separados por ${winPctFav - winPctDog} puntos porcentuales. Cuando la diferencia es tan pequeña, el factor mental pesa tanto como las estadísticas.`,
+      `${cap(rnd ?? "esta ronda")} del ${input.tournament}: ${level} sobre ${surf}, con dos jugadores separados por solo ${margen} puntos. Cuando la diferencia es tan pequeña, el factor mental pesa tanto como las estadísticas.`,
+      `Solo ${margen} puntos de diferencia en el modelo — ${favLast} (${winPctFav}%) y ${dogLast} (${winPctDog}%) están básicamente igualados. En ${rnd ?? "esta fase"} del ${input.tournament}, ganar los momentos clave vale más que el tenis elaborado.`,
+      `${input.tournament}, ${rnd ?? "ronda avanzada"} — ${level} sobre ${surf}. Ningún análisis predictivo puede separar a estos dos con certeza: ${winPctFav}% vs ${winPctDog}%. Partido para vivir set a set.`,
     ];
     parts.push(pick(openers, seed));
 
@@ -377,6 +385,8 @@ function buildOpeningParagraph(
     const openers = [
       `${rndCtx}${input.tournament} — ${level} sobre ${surf}${hotCtx}. No todos los partidos en ${surf} se deciden con los golpes; este puede depender de quién aguante mejor físicamente en los momentos finales.`,
       `Sobre ${surf}${hotCtx}, este partido del ${input.tournament} tiene pinta de ser largo y desgastante. La capacidad física puede acabar siendo más decisiva que la técnica.`,
+      `${surf.charAt(0).toUpperCase() + surf.slice(1)}${hotCtx} — el contexto físico de este partido del ${input.tournament} no es un detalle menor. Los sets largos y el desgaste acumulado pueden cambiar el resultado más que cualquier golpe.`,
+      `En ${input.tournament}, ${level} sobre ${surf}${hotCtx}: ${favLast} (${winPctFav}%) tiene ventaja, pero las condiciones sugieren que el partido será una prueba de resistencia tanto como de talento.`,
     ];
     parts.push(pick(openers, seed));
     if (Math.abs(fitFav - fitDog) >= 2) {
@@ -384,7 +394,12 @@ function buildOpeningParagraph(
       const fitterVal = Math.max(fitFav, fitDog);
       const lessP = fitFav >= fitDog ? dogLast : favLast;
       const lessVal = Math.min(fitFav, fitDog);
-      parts.push(`El perfil físico favorece a ${fitterP} (${fitterVal}/10 vs ${lessVal}/10 de ${lessP}) — una ventaja que se amplía si el partido llega al tercer set.`);
+      const fitPhrases = [
+        `El perfil físico favorece a ${fitterP} (${fitterVal}/10 vs ${lessVal}/10 de ${lessP}) — una ventaja que se amplía si el partido llega al tercer set.`,
+        `${fitterP} tiene margen físico sobre ${lessP} (${fitterVal} vs ${lessVal} sobre 10): en los tramos finales de un partido largo, esa diferencia se nota.`,
+        `Si el partido se alarga — y sobre ${surf} hay posibilidades — ${fitterP} tiene mejor perfil de resistencia que ${lessP}.`,
+      ];
+      parts.push(pick(fitPhrases, seed + 5));
     }
 
   } else if (matchupType === "sorpresa") {
@@ -392,13 +407,25 @@ function buildOpeningParagraph(
     const openers = [
       `${rndCtx}${input.tournament} — ${level} sobre ${surf}. ${favLast} sale como favorito (${winPctFav}%), pero ${dogLast} (${winPctDog}%) llega con argumentos reales para complicarlo.`,
       `Sobre ${surf} de ${level}, ${favLast} tiene la ventaja teórica (${winPctFav}%), aunque los datos de ${dogLast} dicen que subestimarlo sería un error.`,
+      `${favLast} lidera las probabilidades (${winPctFav}%) en esta ${rnd ?? "cita"} del ${input.tournament}, pero ${dogLast} tiene algo a su favor que los números fríos no siempre capturan.`,
+      `${winPctFav}% para ${favLast} y ${winPctDog}% para ${dogLast} — la diferencia es real pero no abrumadora. ${dogLast} tiene argumentos para creer en esta ${rnd ?? "ronda"} del ${input.tournament}.`,
     ];
     parts.push(pick(openers, seed));
 
     if (dogSurf && (dogSurf.winRate ?? 0) >= 0.68) {
-      parts.push(`${dogLast} rinde especialmente bien en ${surf}: ${pct(dogSurf.winRate)} en ${dogSurf.matches} partidos — no es casualidad que el modelo no lo descarte.`);
+      const surpriseSurfPhrases = [
+        `${dogLast} rinde especialmente bien en ${surf}: ${pct(dogSurf.winRate)} en ${dogSurf.matches} partidos — no es casualidad que el modelo no lo descarte.`,
+        `Los números de ${dogLast} en ${surf} hablan solos: ${pct(dogSurf.winRate)} en ${dogSurf.matches} partidos. Es el tipo de dato que justifica que el modelo le dé margen real.`,
+        `La superficie juega a favor de ${dogLast}: ${pct(dogSurf.winRate)} de victorias en ${dogSurf.matches} partidos sobre ${surf} lo convierten en un peligro mayor de lo que el ranking sugiere.`,
+      ];
+      parts.push(pick(surpriseSurfPhrases, seed + 3));
     } else if (dogStrVal >= 5) {
-      parts.push(`${dogLast} llega con ${dogStrVal} victorias en fila — forma que no se puede ignorar.`);
+      const streakPhrases = [
+        `${dogLast} llega con ${dogStrVal} victorias en fila — forma que no se puede ignorar.`,
+        `El momentum de ${dogLast} es real: ${dogStrVal} triunfos consecutivos antes de este partido.`,
+        `${dogStrVal} victorias seguidas para ${dogLast} — cuando un jugador encadena esa racha, algo está funcionando bien.`,
+      ];
+      parts.push(pick(streakPhrases, seed + 3));
     }
 
   } else {
@@ -406,6 +433,9 @@ function buildOpeningParagraph(
     const openers = [
       `${rndCtx}${input.tournament} — ${level} sobre ${surf}. El modelo lo ve muy abierto: ${favLast} con el ${winPctFav}% y ${dogLast} con el ${winPctDog}%. En la práctica, cualquiera puede ganar.`,
       `Hay partidos difíciles de analizar porque genuinamente pueden salir de cualquier manera. Este, en ${rndCtx.toLowerCase() || ""}${input.tournament} sobre ${surf}, es uno de ellos: ${winPctFav}% vs ${winPctDog}%.`,
+      `${favLast} y ${dogLast} se miden en ${rnd ?? "esta ronda"} del ${input.tournament} con un margen mínimo: ${winPctFav}% contra ${winPctDog}%. No hay favorito claro — hay un partido por ver.`,
+      `${level} en ${input.tournament}, ${surf}. El modelo da una leve ventaja a ${favLast} (${winPctFav}%), pero con ${dogLast} a ${winPctDog}% la diferencia está dentro del margen de cualquier variable imprevista.`,
+      `${winPctFav}% para ${favLast}, ${winPctDog}% para ${dogLast}. Sobre ${surf} de ${level}, los datos no permiten más certeza que esa — el partido decidirá el resto.`,
     ];
     parts.push(pick(openers, seed));
   }
@@ -419,20 +449,33 @@ function buildOpeningParagraph(
       `${favLast} encadena ${favStreakVal} victorias consecutivas y llega con confianza.`,
       `La racha de ${favLast} — ${favStreakVal} victorias seguidas — refuerza su condición de favorito.`,
       `${favLast} está en un buen momento: ${favStreakVal} triunfos al hilo antes de este partido.`,
+      `${favStreakVal} victorias seguidas para ${favLast}: llega con la dinámica de alguien que no ha perdido el paso.`,
+      `Forma: ${favLast} lleva ${favStreakVal} partidos ganando. Cuando alguien encadena esa cifra, es difícil que sea casualidad.`,
     ];
     parts.push(pick(streakPhrases, seed + 1));
   } else if (favStreakVal <= -3) {
-    parts.push(`${favLast} llega con ${Math.abs(favStreakVal)} derrotas seguidas — un bache que el modelo tiene en cuenta.`);
+    const badStreakPhrases = [
+      `${favLast} llega con ${Math.abs(favStreakVal)} derrotas seguidas — un bache que el modelo tiene en cuenta.`,
+      `El favorito no viene en su mejor momento: ${Math.abs(favStreakVal)} derrotas consecutivas antes de este partido.`,
+      `${Math.abs(favStreakVal)} caídas seguidas para ${favLast} — la confianza puede ser un factor aquí.`,
+    ];
+    parts.push(pick(badStreakPhrases, seed + 1));
   }
 
   if (dogStreakVal >= 4) {
     const streakPhrases = [
       `${dogLast} también llega con confianza: ${dogStreakVal} victorias en fila.`,
       `No hay que olvidar que ${dogLast} lleva ${dogStreakVal} triunfos seguidos — llega con momentum.`,
+      `${dogLast} suma ${dogStreakVal} victorias consecutivas — una señal de que algo está funcionando bien en su juego.`,
+      `El underdog no llega frío: ${dogStreakVal} partidos ganando antes de plantarse aquí.`,
     ];
     parts.push(pick(streakPhrases, seed + 2));
   } else if (dogStreakVal <= -3) {
-    parts.push(`${dogLast} viene de perder ${Math.abs(dogStreakVal)} seguidos — llega en un momento difícil.`);
+    const badStreakPhrases = [
+      `${dogLast} viene de perder ${Math.abs(dogStreakVal)} seguidos — llega en un momento difícil.`,
+      `La dinámica de ${dogLast} no acompaña: ${Math.abs(dogStreakVal)} derrotas antes de este partido.`,
+    ];
+    parts.push(pick(badStreakPhrases, seed + 2));
   }
 
   // ── Descanso (solo si es desequilibrado) ─────────────────
@@ -440,9 +483,17 @@ function buildOpeningParagraph(
   const dogRest = favIsP1 ? input.daysRest2 : input.daysRest1;
   if (favRest != null && dogRest != null) {
     if (favRest === 0 && dogRest >= 2) {
-      parts.push(`Un factor a seguir: ${favLast} jugó hoy mismo y llega con menos tiempo de recuperación que ${dogLast} (${dogRest} días de descanso).`);
+      const restPhrases = [
+        `Un factor a seguir: ${favLast} jugó hoy mismo y llega con menos tiempo de recuperación que ${dogLast} (${dogRest} días de descanso).`,
+        `${favLast} tuvo que jugar hoy — sin descanso, frente a ${dogLast} que lleva ${dogRest} días recuperando. La piernas pueden pesar en el tercer set.`,
+      ];
+      parts.push(pick(restPhrases, seed + 3));
     } else if (dogRest === 0 && favRest >= 2) {
-      parts.push(`${dogLast} llega con fatiga acumulada — jugó hoy, mientras ${favLast} ha podido descansar ${favRest} días.`);
+      const restPhrases = [
+        `${dogLast} llega con fatiga acumulada — jugó hoy, mientras ${favLast} ha podido descansar ${favRest} días.`,
+        `La diferencia de recuperación suma a favor de ${favLast}: ${favRest} días descansando frente a ${dogLast}, que jugó hoy.`,
+      ];
+      parts.push(pick(restPhrases, seed + 3));
     }
   }
 
@@ -464,7 +515,7 @@ function buildBattlegroundParagraph(
   const parts: string[] = [];
   const { matchup } = input;
   const surf = surfaceLabel(input.surface);
-  const seed = nameHash(favLast + dogLast + "battle");
+  const seed = nameHash(favLast + dogLast + input.tournament + input.surface + "battle");
 
   const favPat = favIsP1 ? input.p1Patterns : input.p2Patterns;
   const dogPat = favIsP1 ? input.p2Patterns : input.p1Patterns;
@@ -474,17 +525,33 @@ function buildBattlegroundParagraph(
   // ── El dato de superficie (con interpretación, no solo números) ──
   if (favSurf && dogSurf) {
     const diff = pctDiff(favSurf.winRate, dogSurf.winRate);
+    const betterSurf = (favSurf.winRate ?? 0) >= (dogSurf.winRate ?? 0) ? favLast : dogLast;
+    const worseSurf  = betterSurf === favLast ? dogLast : favLast;
+    const betterPct  = pct(Math.max(favSurf.winRate ?? 0, dogSurf.winRate ?? 0));
+    const worsePct   = pct(Math.min(favSurf.winRate ?? 0, dogSurf.winRate ?? 0));
+    const betterM    = betterSurf === favLast ? favSurf.matches : dogSurf.matches;
     if (diff != null && diff >= 15) {
-      const better = (favSurf.winRate ?? 0) >= (dogSurf.winRate ?? 0) ? favLast : dogLast;
-      const betterPct = pct(Math.max(favSurf.winRate ?? 0, dogSurf.winRate ?? 0));
-      const worsePct = pct(Math.min(favSurf.winRate ?? 0, dogSurf.winRate ?? 0));
-      const worseN = better === favLast ? dogLast : favLast;
-      parts.push(`Mirando los números en ${surf}, la diferencia salta a la vista: ${better} gana ${betterPct} de sus partidos en esta superficie (${better === favLast ? favSurf.matches : dogSurf.matches}p) frente al ${worsePct} de ${worseN}. Eso es una brecha de ${diff.toFixed(0)} puntos — si el terreno importa (y siempre importa), el duelo está marcado desde el inicio.`);
+      const bigDiffPhrases = [
+        `Mirando los números en ${surf}, la diferencia salta a la vista: ${betterSurf} gana ${betterPct} de sus partidos aquí (${betterM}p) frente al ${worsePct} de ${worseSurf}. Una brecha de ${diff.toFixed(0)} puntos — si la superficie importa (y siempre importa), el duelo está marcado desde el inicio.`,
+        `${surf.charAt(0).toUpperCase() + surf.slice(1)}: ${betterSurf} con ${betterPct} (${betterM}p), ${worseSurf} con ${worsePct}. Esa diferencia de ${diff.toFixed(0)} puntos no es ruido estadístico — es una preferencia real de superficie.`,
+        `La ventaja de superficie de ${betterSurf} sobre ${worseSurf} en ${surf} es de ${diff.toFixed(0)} puntos porcentuales (${betterPct} vs ${worsePct} en ${betterM} partidos). En un matchup competido, eso puede ser determinante.`,
+        `Historial en ${surf}: ${betterSurf} gana ${betterPct} de sus partidos aquí, ${worseSurf} solo el ${worsePct}. Con ${diff.toFixed(0)} puntos de diferencia en una misma superficie, el contexto del partido ya favorece a uno desde la salida.`,
+      ];
+      parts.push(pick(bigDiffPhrases, seed));
     } else if (diff != null && diff >= 7) {
-      const better = (favSurf.winRate ?? 0) >= (dogSurf.winRate ?? 0) ? favLast : dogLast;
-      parts.push(`Los registros en ${surf} dan ventaja moderada a ${better}: ${pct(favSurf.winRate)} vs ${pct(dogSurf.winRate)}, con ${favSurf.matches} y ${dogSurf.matches} partidos respectivamente — diferencia real pero no determinante.`);
+      const medDiffPhrases = [
+        `Los registros en ${surf} dan ventaja moderada a ${betterSurf}: ${betterPct} vs ${worsePct} de ${worseSurf} — diferencia real pero no determinante.`,
+        `En ${surf}, ${betterSurf} tiene mejor historial (${betterPct}) que ${worseSurf} (${worsePct}), aunque el margen de ${diff.toFixed(0)} puntos deja la puerta abierta.`,
+        `${betterSurf} gana ${diff.toFixed(0)} puntos porcentuales a ${worseSurf} en ${surf} (${betterPct} vs ${worsePct}). No es una brecha decisiva, pero sí un matiz a favor.`,
+      ];
+      parts.push(pick(medDiffPhrases, seed));
     } else if (diff != null) {
-      parts.push(`En ${surf} los números de ambos son muy parejos: ${favLast} con ${pct(favSurf.winRate)} (${favSurf.matches}p) y ${dogLast} con ${pct(dogSurf.winRate)} (${dogSurf.matches}p). La superficie no será el factor decisivo.`);
+      const evenPhrases = [
+        `En ${surf} los números de ambos son muy parejos: ${favLast} con ${pct(favSurf.winRate)} (${favSurf.matches}p) y ${dogLast} con ${pct(dogSurf.winRate)} (${dogSurf.matches}p). La superficie no será el factor decisivo.`,
+        `Historial similar de ambos en ${surf} — ${favLast} con ${pct(favSurf.winRate)}, ${dogLast} con ${pct(dogSurf.winRate)}. La superficie no inclina la balanza.`,
+        `Ni uno ni otro tiene una ventaja clara sobre ${surf}: ${pct(favSurf.winRate)} para ${favLast}, ${pct(dogSurf.winRate)} para ${dogLast}. El partido se decidirá por otros factores.`,
+      ];
+      parts.push(pick(evenPhrases, seed));
     }
   } else if (matchup.surfaceNote) {
     parts.push(cap(matchup.surfaceNote));
@@ -691,7 +758,7 @@ function buildStoryParagraph(
   const parts: string[] = [];
   const { matchup } = input;
   const surf = surfaceLabel(input.surface);
-  const seed = nameHash(favLast + dogLast + "story");
+  const seed = nameHash(favLast + dogLast + input.tournament + input.surface + "story");
 
   const favPat = favIsP1 ? input.p1Patterns : input.p2Patterns;
   const dogPat = favIsP1 ? input.p2Patterns : input.p1Patterns;
@@ -810,14 +877,35 @@ function buildStoryParagraph(
   // ── Insight clave ─────────────────────────────────────────
   if (matchup.keyInsight) parts.push(cap(matchup.keyInsight));
 
-  // Fallback según tipo de matchup
+  // Fallback según tipo de matchup — variedad para evitar repetición
   if (parts.length === 0) {
     if (matchupType === "equilibrado" || winPctFav <= 60) {
-      parts.push(`En un duelo tan igualado, el partido lo decidirán los momentos de mayor tensión — los break points al 40-40 y los puntos clave de cada set.`);
+      const evenFallbacks = [
+        `En un duelo tan igualado, el partido lo decidirán los momentos de mayor tensión — los break points al 40-40 y los puntos clave de cada set.`,
+        `Cuando las probabilidades están tan repartidas, los sets individuales cobran más peso que el análisis global — cualquier mini-racha puede ser decisiva.`,
+        `Con tan poco margen entre ambos, el partido se puede decidir en un break temprano del segundo set o en un tiebreak que cambie el momentum.`,
+      ];
+      parts.push(pick(evenFallbacks, seed + 10));
     } else if (matchupType === "dominio-claro") {
-      parts.push(`La ventaja estructural de ${favLast} tiende a crecer cuanto más largo sea el partido — la regularidad en los tramos finales es su firma.`);
+      const domFallbacks = [
+        `La ventaja estructural de ${favLast} tiende a crecer cuanto más largo sea el partido — la regularidad en los tramos finales es su firma.`,
+        `${favLast} ha construido su ventaja sobre datos concretos; mantener ese nivel durante tres sets debería ser suficiente.`,
+        `El favorito no necesita hacer nada extraordinario — jugar su tenis habitual a un nivel sostenido debería bastar para resolver el partido.`,
+      ];
+      parts.push(pick(domFallbacks, seed + 10));
+    } else if (matchupType === "batalla-fisica") {
+      const physFallbacks = [
+        `Los partidos físicamente exigentes tienen su propia lógica: quien entre en el tercer set con menos desgaste acumulado tiene la iniciativa.`,
+        `Sobre ${surf}, los rallies largos son inevitables — y quien mejor gestione la energía en los momentos de mayor tensión suele llevarse el partido.`,
+      ];
+      parts.push(pick(physFallbacks, seed + 10));
     } else {
-      parts.push(`Quien gestione mejor la presión en los momentos clave tendrá la ventaja — en esta clase de enfrentamientos los detalles marcan la diferencia.`);
+      const genericFallbacks = [
+        `Los detalles marcan la diferencia en esta clase de enfrentamientos — un break de más o de menos puede cambiar completamente la lectura del partido.`,
+        `El guion puede romperse en cualquier momento: la diferencia entre ambos no es suficiente para que ninguno domine sin respuesta.`,
+        `Partido abierto a distintos escenarios — el primer set suele marcar la pauta en matchups de este tipo.`,
+      ];
+      parts.push(pick(genericFallbacks, seed + 10));
     }
   }
 
@@ -837,7 +925,7 @@ function buildVerdictParagraph(
   favProfile: TacticalProfile,
   dogProfile: TacticalProfile,
 ): string {
-  const seed = nameHash(favLast + dogLast + "verdict");
+  const seed = nameHash(favLast + dogLast + input.tournament + input.surface + "verdict");
   const favPat = favIsP1 ? input.p1Patterns : input.p2Patterns;
   const dogPat = favIsP1 ? input.p2Patterns : input.p1Patterns;
   const favStreak = favIsP1 ? input.p1Streak : input.p2Streak;
@@ -875,37 +963,74 @@ function buildVerdictParagraph(
     `${favLast} se presenta como ${dominanceAdj} con el ${winPctFav}% de probabilidades.`,
     `El modelo sitúa a ${favLast} como ${dominanceAdj}: ${winPctFav}% frente al ${winPctDog}% de ${dogLast}.`,
     `${winPctFav}% para ${favLast}, ${winPctDog}% para ${dogLast} — lo que lo convierte en ${dominanceAdj}.`,
+    `Acumulando todos los factores, ${favLast} es ${dominanceAdj} con un ${winPctFav}% de probabilidades de victoria.`,
+    `La balanza se inclina hacia ${favLast} (${winPctFav}%) — ${dominanceAdj} sobre ${dogLast} (${winPctDog}%).`,
+    `${dominanceAdj.charAt(0).toUpperCase() + dominanceAdj.slice(1)}: así llega ${favLast} al ${input.tournament} con un ${winPctFav}% según el análisis.`,
   ];
   let verdict = pick(verdictIntros, seed);
 
   if (conditionsFor.length > 0) {
-    verdict += ` Hoy también cuenta a su favor: ${conditionsFor.join(", ")}.`;
+    const forPhrases = [
+      ` Hoy también cuenta a su favor: ${conditionsFor.join(", ")}.`,
+      ` A eso se suma: ${conditionsFor.join(", ")}.`,
+      ` Factores adicionales a su favor: ${conditionsFor.join(", ")}.`,
+    ];
+    verdict += pick(forPhrases, seed + 1);
   }
   if (conditionsAgainst.length > 0) {
-    verdict += ` No todo es positivo para él: ${conditionsAgainst.join("; ")}.`;
+    const againstPhrases = [
+      ` No todo es positivo para él: ${conditionsAgainst.join("; ")}.`,
+      ` Hay matices que complican el escenario: ${conditionsAgainst.join("; ")}.`,
+      ` El análisis también anota en contra: ${conditionsAgainst.join("; ")}.`,
+    ];
+    verdict += pick(againstPhrases, seed + 2);
   }
 
   // Nota de nivel si hay dato sólido
   const favLevel = getLevelSplit(favPat, input.tourneyLevel);
   if (favLevel && favLevel.matches >= 8 && (favLevel.winRate ?? 0) >= 0.78) {
-    verdict += ` En ${levelName(input.tourneyLevel)}, ${favLast} gana el ${pct(favLevel.winRate)} de sus partidos — un referente que respalda la predicción.`;
+    const levelPhrases = [
+      ` En ${levelName(input.tourneyLevel)}, ${favLast} gana el ${pct(favLevel.winRate)} de sus partidos — un referente que respalda la predicción.`,
+      ` Su historial en ${levelName(input.tourneyLevel)} confirma que ${favLast} sabe rendir en este nivel: ${pct(favLevel.winRate)} de victorias.`,
+    ];
+    verdict += pick(levelPhrases, seed + 3);
   }
 
   // Escenario de sorpresa — específico por tipo de matchup
   let upset: string;
   if (winPctDog >= 40) {
-    upset = matchupType === "sorpresa"
-      ? `${dogLast} tiene argumentos reales: si su ${dogProfile.weapon.split(" — ")[0].toLowerCase()} funciona desde el primer game, puede sostener el nivel durante todo el partido.`
-      : `${dogLast} tiene margen de sorpresa — ${winPctDog}% no es poca cosa. Si impone su juego y limita los errores, el resultado puede ser cualquiera.`;
+    const upsetPhrases40 = matchupType === "sorpresa" ? [
+      `${dogLast} tiene argumentos reales: si su ${dogProfile.weapon.split(" — ")[0].toLowerCase()} funciona desde el primer game, puede sostener el nivel durante todo el partido.`,
+      `Para ${dogLast} no es un escenario de resistencia heroica — tiene armas genuinas. Si las activa pronto, el partido se transforma.`,
+      `${winPctDog}% para ${dogLast} no es residual. Sus condiciones para ganar existen y no requieren que el favorito se derrumbe.`,
+    ] : [
+      `${dogLast} tiene margen de sorpresa — ${winPctDog}% no es poca cosa. Si impone su juego y limita los errores, el resultado puede ser cualquiera.`,
+      `Con un ${winPctDog}%, ${dogLast} no es un extra. Tiene opciones reales si consigue trasladar su mejor versión desde el inicio.`,
+      `El modelo no descarta a ${dogLast}: ${winPctDog}% es suficiente para que cualquier caída del nivel del favorito cambie el resultado.`,
+    ];
+    upset = pick(upsetPhrases40, seed + 4);
   } else if (winPctDog >= 28) {
-    upset = `Para ${dogLast}, ganar requiere que ${favLast} tenga un día por debajo de su nivel o que el partido tome un giro inusual — posible, aunque no lo más probable.`;
+    const upsetPhrases28 = [
+      `Para ${dogLast}, ganar requiere que ${favLast} tenga un día por debajo de su nivel o que el partido tome un giro inusual — posible, aunque no lo más probable.`,
+      `${dogLast} tiene camino, pero estrecho: necesita que el partido no siga el guion y que ${favLast} no esté al máximo.`,
+      `Una remontada de ${dogLast} es posible estadísticamente, aunque el escenario más probable apunta al favorito.`,
+    ];
+    upset = pick(upsetPhrases28, seed + 4);
   } else {
-    upset = `${dogLast} necesitaría un colapso inusual del favorito — estadísticamente improbable dado el margen.`;
+    const upsetPhrasesLow = [
+      `${dogLast} necesitaría un colapso inusual del favorito — estadísticamente improbable dado el margen.`,
+      `El margen es suficientemente amplio como para que ${favLast} pueda gestionar incluso un día irregular.`,
+      `Con un ${winPctDog}%, ${dogLast} llega con pocas opciones reales — necesitaría un partido perfecto y uno pésimo del rival.`,
+    ];
+    upset = pick(upsetPhrasesLow, seed + 4);
   }
 
   // Factor de riesgo si lo hay
   const riskNote = input.matchup.riskFactor
-    ? ` Factor de incertidumbre a vigilar: ${input.matchup.riskFactor.charAt(0).toLowerCase() + input.matchup.riskFactor.slice(1)}.`
+    ? pick([
+        ` Factor de incertidumbre a vigilar: ${input.matchup.riskFactor.charAt(0).toLowerCase() + input.matchup.riskFactor.slice(1)}.`,
+        ` Hay un elemento que puede alterar el guion: ${input.matchup.riskFactor.charAt(0).toLowerCase() + input.matchup.riskFactor.slice(1)}.`,
+      ], seed + 5)
     : "";
 
   return `${verdict} ${upset}${riskNote}`;
