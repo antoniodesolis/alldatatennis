@@ -1,9 +1,12 @@
 /**
- * Poller de estadísticas — se arranca desde instrumentation.ts.
- * Cada 20 minutos:
- *   1. Obtiene los partidos del día (reutiliza la lógica de /api/matches)
- *   2. Para cada partido terminado que no esté procesado: scraping TennisExplorer
- *   3. Invalida caché de patrones de los jugadores afectados
+ * Poller de estadísticas — se arranca desde instrumentation.ts SOLO en entorno local.
+ *
+ * En Vercel (serverless) este módulo no hace nada:
+ *   - setInterval no persiste entre invocaciones de función
+ *   - No existe localhost:3000 en el contexto de ejecución
+ *   - El daily-sync lo gestiona el cron job de Vercel
+ *
+ * En local corre cada 20 minutos para procesar partidos terminados del día.
  */
 
 import { scrapeFinishedMatches } from "./ingest/te-scraper";
@@ -37,7 +40,12 @@ async function runPoll() {
     }
 
     const finished = matches.filter((m: { status: string }) => m.status === "finished");
-    const unprocessed = finished.filter((m: { id: string }) => !isMatchProcessed(`te_${m.id}`));
+
+    // isMatchProcessed es async — filtrar con Promise.all
+    const processedFlags = await Promise.all(
+      finished.map((m: { id: string }) => isMatchProcessed(`te_${m.id}`))
+    );
+    const unprocessed = finished.filter((_: unknown, i: number) => !processedFlags[i]);
 
     if (unprocessed.length === 0) {
       console.log(`[poller] ${finished.length} terminados, todos ya procesados.`);
@@ -46,13 +54,13 @@ async function runPoll() {
 
     const { scraped, errors } = await scrapeFinishedMatches(matches);
 
-    // Invalidar caché de patrones de jugadores afectados
+    // Invalidar caché de patrones de jugadores afectados (resetPatterns es async)
     const slugsAffected = new Set<string>();
     for (const m of unprocessed) {
       if (m.player1Slug) slugsAffected.add(m.player1Slug);
       if (m.player2Slug) slugsAffected.add(m.player2Slug);
     }
-    for (const slug of slugsAffected) resetPatterns(slug);
+    await Promise.all([...slugsAffected].map((slug) => resetPatterns(slug)));
 
     console.log(`[poller] Scraped: ${scraped}, errores: ${errors}, patrones invalidados: ${slugsAffected.size}`);
   } catch (err) {
@@ -61,6 +69,12 @@ async function runPoll() {
 }
 
 export function startStatsPoller() {
+  // No arrancar en Vercel / entornos serverless
+  if (process.env.VERCEL || process.env.VERCEL_ENV) {
+    console.log("[poller] Entorno Vercel detectado — poller desactivado (usa cron job).");
+    return;
+  }
+
   // Primera ejecución al arrancar (con delay de 30s para que el servidor esté listo)
   setTimeout(() => {
     runPoll();

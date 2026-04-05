@@ -4,6 +4,10 @@
  * Pipeline diario completo de retroalimentación.
  */
 
+// Ampliar timeout de Vercel a 300s (máximo en plan Pro).
+// Sin esto Vercel corta la función a los 10s y devuelve 504.
+export const maxDuration = 300;
+
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db/client";
 import { scrapeTeMonth } from "@/lib/ingest/te-history";
