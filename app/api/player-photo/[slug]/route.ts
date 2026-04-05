@@ -41,7 +41,7 @@ const LAST: Record<string, string> = {
   kubler:"kb95", munar:"mu94", clarke:"ci14", brooksby:"b0cd",
   kym:"k0ep", "de-jong":"d0c1", lehecka:"l0bv", fonseca:"f0fv",
   "reis-da-silva":"r0a7", schwaerzler:"s0wt", thompson:"tc61",
-  "prado-angelo":"p0iy", "juan-cerundolo":"c0c8", ficovich:"fa43",
+  "prado-angelo":"p0iy", ficovich:"fa43",
   rodionov:"r09x", engel:"e0dd", uchida:"u120", majchrzak:"mq75",
   khachanov:"ke29", coppejans:"cg33", jacquet:"j0az", djere:"db63",
   midon:"m0oh", riedi:"r0fs", tien:"t0ha", draxl:"d0dp",
