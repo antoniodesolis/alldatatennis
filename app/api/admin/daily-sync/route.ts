@@ -10,7 +10,7 @@ export const maxDuration = 300;
 
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db/client";
-import { scrapeTeMonth } from "@/lib/ingest/te-history";
+import { scrapeTeDay } from "@/lib/ingest/te-history";
 import { ATP_SLUG_MAP } from "@/lib/analytics/player-resolver";
 import { recomputeCalibration, getLearningStats } from "@/lib/learning/feedback";
 import { backfillOpponentStyles, reclassifyAllStyles } from "@/lib/learning/style-classifier";
@@ -284,7 +284,7 @@ export async function POST(req: NextRequest) {
     return d.toISOString().slice(0, 10);
   })();
 
-  const [year, month] = targetDate.split("-").map(Number);
+  const [year, month, day] = targetDate.split("-").map(Number);
   const dryRun = body.dryRun ?? false;
 
   const result: Record<string, unknown> = { date: targetDate, dryRun };
@@ -295,9 +295,11 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Paso 1: Ingestar partidos del día ────────────────────
+  // Scrapeamos solo el día concreto (no el mes completo) para cumplir maxDuration=300s.
+  // scrapeTeDay hace 1 request + inserts en lugar de ~30 requests.
   console.log(`[daily-sync] Ingesting ${targetDate}…`);
   try {
-    const ingestResult = await scrapeTeMonth(year, month);
+    const ingestResult = await scrapeTeDay(year, month, day);
     result.ingest = {
       matches: ingestResult.matches,
       inserted: ingestResult.inserted,
