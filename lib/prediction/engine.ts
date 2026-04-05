@@ -31,6 +31,8 @@ import { analyzeMatchup } from "../analytics/matchup-intelligence";
 import { generateNarrative } from "../analytics/narrative";
 import type { TacticalAnalysis } from "../analytics/narrative";
 import { getPlayerInsights } from "../db/queries";
+import { getMomentumProfile, refreshMomentumProfile } from "../analytics/momentum-patterns";
+import type { MomentumProfile } from "../analytics/momentum-patterns";
 
 // ── Constants ─────────────────────────────────────────────
 
@@ -1105,10 +1107,17 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
 
   let p1Insights: Awaited<ReturnType<typeof getPlayerInsights>> | null = null;
   let p2Insights: Awaited<ReturnType<typeof getPlayerInsights>> | null = null;
+  let p1Momentum: MomentumProfile | null = null;
+  let p2Momentum: MomentumProfile | null = null;
   try {
     [p1Insights, p2Insights] = await Promise.all([
       getPlayerInsights(p1),
       getPlayerInsights(p2),
+    ]);
+    // Obtener perfil de momentum (cacheado 24h, recomputar si expirado)
+    [p1Momentum, p2Momentum] = await Promise.all([
+      getMomentumProfile(p1).then((m) => m ?? refreshMomentumProfile(p1).catch(() => null)),
+      getMomentumProfile(p2).then((m) => m ?? refreshMomentumProfile(p2).catch(() => null)),
     ]);
   } catch { /* insights no disponibles */ }
 
@@ -1149,6 +1158,8 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
       mainFactor: topFactor?.id,
       p1AccumulatedInsights: (p1Insights && p1Insights.matchCount > 0) ? p1Insights : null,
       p2AccumulatedInsights: (p2Insights && p2Insights.matchCount > 0) ? p2Insights : null,
+      p1Momentum: (p1Momentum && p1Momentum.matchesAnalyzed >= 5) ? p1Momentum : null,
+      p2Momentum: (p2Momentum && p2Momentum.matchesAnalyzed >= 5) ? p2Momentum : null,
     });
   } catch (e) {
     console.error("[engine] generateNarrative error:", (e as Error).message);

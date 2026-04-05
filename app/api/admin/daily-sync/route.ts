@@ -16,6 +16,7 @@ import { recomputeCalibration, getLearningStats } from "@/lib/learning/feedback"
 import { backfillOpponentStyles, reclassifyAllStyles } from "@/lib/learning/style-classifier";
 import { getPlayerPatterns, resetPatterns } from "@/lib/analytics/patterns";
 import { analyzeMatch } from "@/lib/analytics/match-patterns";
+import { refreshMomentumProfile } from "@/lib/analytics/momentum-patterns";
 
 // ── ATP_RANK (top-100 atpCode → rank) ─────────────────────
 const ATP_RANK: Record<string, number> = {
@@ -378,6 +379,8 @@ async function recomputePatternsForSlugs(slugs: string[]): Promise<{ recomputed:
       await resetPatterns(slug);
       await getPlayerPatterns(slug, "", 50);
       await getPlayerPatterns(slug, "", 30);
+      // Recalcular perfil de momentum (resiliencia, cierre, colapso, tiebreaks)
+      await refreshMomentumProfile(slug);
       recomputed++;
     } catch {
       errors++;

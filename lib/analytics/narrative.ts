@@ -9,6 +9,7 @@
 import type { MatchupIntelligence } from "./matchup-intelligence";
 import type { TacticalProfile } from "./player-profiles";
 import type { PlayerPatterns, SplitStat } from "./patterns";
+import type { MomentumProfile } from "./momentum-patterns";
 
 // ── Tipos de entrada ──────────────────────────────────────
 
@@ -81,6 +82,10 @@ export interface NarrativeInput {
   // Insights acumulados de partidos reales
   p1AccumulatedInsights?: AccumulatedInsightsSnap | null;
   p2AccumulatedInsights?: AccumulatedInsightsSnap | null;
+
+  // Perfil de momentum (patrones intra-partido acumulados)
+  p1Momentum?: MomentumProfile | null;
+  p2Momentum?: MomentumProfile | null;
 }
 
 export interface AccumulatedInsightsSnap {
@@ -824,6 +829,41 @@ function buildStoryParagraph(
     const w = dogAccum.weaknessesConfirmed[0];
     if (w && w.length > 15) {
       parts.push(`Un punto débil reciente de ${dogLast} que ${favLast} puede explotar: ${w.charAt(0).toLowerCase() + w.slice(1)}.`);
+    }
+  }
+
+  // ── Patrones de momentum (resiliencia, cierre, colapso) ────
+  const favMom = favIsP1 ? input.p1Momentum : input.p2Momentum;
+  const dogMom = favIsP1 ? input.p2Momentum : input.p1Momentum;
+
+  // Línea más relevante del favorito (resilience o closing)
+  if (favMom && favMom.narrativeLines.length > 0 && favMom.matchesAnalyzed >= 5) {
+    const line = favMom.narrativeLines[0];
+    if (line && parts.every((p) => !p.includes("remontado") && !p.includes("cierra"))) {
+      parts.push(line);
+    }
+  }
+  // Línea más relevante del underdog — contrapunto al favorito
+  if (dogMom && dogMom.narrativeLines.length > 0 && dogMom.matchesAnalyzed >= 5) {
+    // Buscar una línea distinta a la del favorito (evitar que ambos tengan "resiliente")
+    const favProfile = favMom?.mentalProfile ?? "";
+    const usableLine = dogMom.narrativeLines.find((l) =>
+      !l.includes(favProfile) && l.length > 30
+    ) ?? dogMom.narrativeLines[0];
+    if (usableLine && parts.every((p) => !p.includes(usableLine.slice(0, 30)))) {
+      parts.push(usableLine);
+    }
+  }
+  // Confrontación de perfiles mentales (si son opuestos)
+  if (favMom && dogMom && favMom.matchesAnalyzed >= 5 && dogMom.matchesAnalyzed >= 5) {
+    const fp = favMom.mentalProfile;
+    const dp = dogMom.mentalProfile;
+    if (fp === "resilient" && dp === "fragile") {
+      parts.push(`Un contraste mental importante: ${favLast} demuestra resiliencia ante la adversidad mientras ${dogLast} tiende a no recuperarse bien cuando el partido se tuerce.`);
+    } else if (fp === "closer" && dp === "volatile") {
+      parts.push(`${favLast} cierra bien cuando tiene ventaja; ${dogLast} ha mostrado tendencia a irregularidades de set a set. El control mental puede ser determinante.`);
+    } else if (dp === "resilient" && fp === "fragile") {
+      parts.push(`Dato mental a favor del underdog: ${dogLast} muestra resiliencia cuando el partido se complica — un factor que compensa parte de la diferencia en papel.`);
     }
   }
 
