@@ -15,6 +15,7 @@ import { ATP_SLUG_MAP } from "@/lib/analytics/player-resolver";
 import { recomputeCalibration, getLearningStats } from "@/lib/learning/feedback";
 import { backfillOpponentStyles, reclassifyAllStyles } from "@/lib/learning/style-classifier";
 import { getPlayerPatterns, resetPatterns } from "@/lib/analytics/patterns";
+import { analyzeMatch } from "@/lib/analytics/match-patterns";
 
 // ── ATP_RANK (top-100 atpCode → rank) ─────────────────────
 const ATP_RANK: Record<string, number> = {
@@ -256,6 +257,119 @@ async function getAffectedSlugs(date: string): Promise<string[]> {
   return (result.rows as unknown as { te_slug: string }[]).map((r) => r.te_slug);
 }
 
+/**
+ * Genera insights post-partido para todos los partidos del día que aún no los tienen.
+ * Usa el score de player_match_stats (fuente te_history) para detectar patrones:
+ * remontadas, tiebreaks decisivos, bagels, oportunidades desperdiciadas, etc.
+ * Los partidos scrapeados en vivo con stats completas ya los generan en te-scraper.ts.
+ */
+async function generateDayInsights(date: string): Promise<{ generated: number; skipped: number }> {
+  const db = getDb();
+
+  // Buscar partidos del día con score que aún no tienen insight
+  const matchesResult = await db.execute({
+    sql: `
+      SELECT DISTINCT
+        pms.te_match_id,
+        pms.tournament,
+        pms.surface,
+        pms.score,
+        win.te_slug  AS winner_slug,
+        los.te_slug  AS loser_slug
+      FROM player_match_stats pms
+      JOIN player_match_stats win ON win.te_match_id = pms.te_match_id AND win.result = 'W'
+      JOIN player_match_stats los ON los.te_match_id = pms.te_match_id AND los.result = 'L'
+      LEFT JOIN match_insights mi ON mi.te_match_id = pms.te_match_id
+      WHERE pms.match_date = ?
+        AND pms.source = 'te_history'
+        AND pms.score IS NOT NULL
+        AND mi.te_match_id IS NULL
+    `,
+    args: [date],
+  });
+
+  const rows = matchesResult.rows as unknown as Array<{
+    te_match_id: string;
+    tournament: string | null;
+    surface: string | null;
+    score: string;
+    winner_slug: string;
+    loser_slug: string;
+  }>;
+
+  let generated = 0;
+  let skipped = 0;
+
+  for (const row of rows) {
+    try {
+      // Sin stats de servicio desde te_history — las columnas son null
+      const emptyStats = {
+        aces: null, doubleFaults: null, firstServePct: null,
+        firstServeWonPct: null, secondServeWonPct: null,
+        bpSaved: null, bpFaced: null, bpConverted: null, bpOpportunities: null,
+        winners: null, unforcedErrors: null,
+      };
+
+      // Intentar recuperar stats reales si existen (de te_scrape)
+      const statsResult = await db.execute({
+        sql: `SELECT aces, double_faults, bp_saved, bp_faced, bp_converted, bp_opportunities, winners, unforced_errors, result
+              FROM player_match_stats WHERE te_match_id = ? ORDER BY result ASC`,
+        args: [row.te_match_id],
+      });
+      const statsRows = statsResult.rows as unknown as Array<{
+        result: string; aces: number|null; double_faults: number|null;
+        bp_saved: number|null; bp_faced: number|null;
+        bp_converted: number|null; bp_opportunities: number|null;
+        winners: number|null; unforced_errors: number|null;
+      }>;
+
+      const winRow = statsRows.find((r) => r.result === "W");
+      const losRow = statsRows.find((r) => r.result === "L");
+
+      const winnerStats = winRow ? {
+        aces: winRow.aces, doubleFaults: winRow.double_faults,
+        firstServePct: null, firstServeWonPct: null, secondServeWonPct: null,
+        bpSaved: winRow.bp_saved, bpFaced: winRow.bp_faced,
+        bpConverted: winRow.bp_converted, bpOpportunities: winRow.bp_opportunities,
+        winners: winRow.winners, unforcedErrors: winRow.unforced_errors,
+      } : emptyStats;
+
+      const loserStats = losRow ? {
+        aces: losRow.aces, doubleFaults: losRow.double_faults,
+        firstServePct: null, firstServeWonPct: null, secondServeWonPct: null,
+        bpSaved: losRow.bp_saved, bpFaced: losRow.bp_faced,
+        bpConverted: losRow.bp_converted, bpOpportunities: losRow.bp_opportunities,
+        winners: losRow.winners, unforcedErrors: losRow.unforced_errors,
+      } : emptyStats;
+
+      const insight = analyzeMatch(row.score, winnerStats, loserStats);
+
+      await db.execute({
+        sql: `
+          INSERT INTO match_insights
+            (te_match_id, match_date, winner_slug, loser_slug, tournament, surface, score,
+             match_pattern, insights_json, enriched_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
+          ON CONFLICT(te_match_id) DO UPDATE SET
+            match_pattern = excluded.match_pattern,
+            insights_json = excluded.insights_json,
+            enriched_at   = excluded.enriched_at
+        `,
+        args: [
+          row.te_match_id, date, row.winner_slug, row.loser_slug,
+          row.tournament, row.surface, row.score,
+          insight.pattern, JSON.stringify(insight),
+        ],
+      });
+      generated++;
+    } catch {
+      skipped++;
+    }
+  }
+
+  return { generated, skipped };
+}
+
 async function recomputePatternsForSlugs(slugs: string[]): Promise<{ recomputed: number; errors: number }> {
   let recomputed = 0;
   let errors = 0;
@@ -328,7 +442,18 @@ export async function POST(req: NextRequest) {
   const styleClassified = await reclassifyAllStyles();
   result.backfillStyles = { rowsUpdated: styleRows, reclassified: styleClassified.length };
 
-  // ── Paso 5: Resolver predicciones del día ────────────────
+  // ── Paso 5: Generar insights post-partido ────────────────
+  // Analiza el score de cada partido para detectar patrones: remontadas,
+  // tiebreaks decisivos, oportunidades desperdiciadas, dominancia, etc.
+  console.log(`[daily-sync] Generating match insights for ${targetDate}…`);
+  try {
+    const insightResult = await generateDayInsights(targetDate);
+    result.matchInsights = insightResult;
+  } catch (err) {
+    result.matchInsights = { error: (err as Error).message };
+  }
+
+  // ── Paso 6: Resolver predicciones del día ────────────────
   const resolvedPreds = await resolveByDateSlug(targetDate);
   result.resolvedPredictions = { count: resolvedPreds };
 
