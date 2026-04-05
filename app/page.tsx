@@ -14,6 +14,79 @@ function slugifyTourney(name: string): string {
     .replace(/[^a-z0-9-]/g, "");
 }
 
+// ── Tournament logos ───────────────────────────────────────
+// Each entry: [keyword array, image URL]. Matched against lowercased, diacritics-stripped name.
+const TOURNAMENT_LOGOS: Array<[string[], string]> = [
+  // Grand Slams
+  [["australian open"],             "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b4/Australian_Open_Logo_2017.svg/250px-Australian_Open_Logo_2017.svg.png"],
+  [["roland garros", "french open"],"https://upload.wikimedia.org/wikipedia/en/thumb/1/1d/Logo_Roland-Garros.svg/250px-Logo_Roland-Garros.svg.png"],
+  [["wimbledon"],                    "https://upload.wikimedia.org/wikipedia/en/thumb/b/b9/Wimbledon.svg/250px-Wimbledon.svg.png"],
+  [["us open"],                      "https://upload.wikimedia.org/wikipedia/commons/thumb/c/cd/Usopen-horizontal-logo.svg/250px-Usopen-horizontal-logo.svg.png"],
+  // Masters 1000
+  [["indian wells", "bnp paribas open"], "https://upload.wikimedia.org/wikipedia/en/thumb/9/92/Bnpparibasopen.jpg/250px-Bnpparibasopen.jpg"],
+  [["miami"],                        "https://upload.wikimedia.org/wikipedia/commons/a/a9/Miami_Open_logo.png"],
+  [["monte carlo", "monte-carlo", "monaco"], "https://upload.wikimedia.org/wikipedia/commons/6/65/Rolex_Monte-Carlo_Masters_2026.png"],
+  [["madrid"],                       "https://upload.wikimedia.org/wikipedia/commons/0/0a/Mutua_Madrid_Open_logo.png"],
+  [["internazionali", "rome", "roma foro", "bnl d'italia", "foro italico", "italian open"], "https://upload.wikimedia.org/wikipedia/en/thumb/9/96/Internazionali_BNL_d%27Italia.gif/250px-Internazionali_BNL_d%27Italia.gif"],
+  [["canadian open", "rogers cup", "national bank open", "toronto", "montreal"], "https://upload.wikimedia.org/wikipedia/commons/5/5b/Rogers_Cup_logo_2020.png"],
+  [["cincinnati", "western southern"], "https://upload.wikimedia.org/wikipedia/en/thumb/a/ae/Cincinnati_Open_logo.svg/250px-Cincinnati_Open_logo.svg.png"],
+  [["shanghai"],                     "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c2/China_Open_logo.png/120px-China_Open_logo.png"],
+  [["paris masters", "bercy", "rolex paris"], "https://upload.wikimedia.org/wikipedia/en/thumb/b/b2/Rolex_Paris_Masters_tournament_logo.jpg/250px-Rolex_Paris_Masters_tournament_logo.jpg"],
+  // ATP 500
+  [["rotterdam", "abn amro"],        "https://upload.wikimedia.org/wikipedia/commons/a/a3/Logo_des_41._ABN_AMRO_WORLD_TENNIS_TOURNAMENT_2014.png"],
+  [["dubai"],                        "https://upload.wikimedia.org/wikipedia/en/d/dc/Dubai_Tennis_Championships_Logo_2011.png"],
+  [["acapulco", "mexicano telcel"],  "https://upload.wikimedia.org/wikipedia/commons/8/89/Abierto_Mexicano_Telcel_presentado_por_HSBC_logo_2018.png"],
+  [["barcelona", "conde de godo", "trofeo conde"], "https://upload.wikimedia.org/wikipedia/en/0/0e/Torneo_Godo_Logo_2009-.png"],
+  [["hamburg", "hambourg", "german open"], "https://upload.wikimedia.org/wikipedia/commons/0/0a/Logo_der_Bet-at-home_Open.jpg"],
+  [["washington", "dc open", "citi dc", "legg mason"], "https://upload.wikimedia.org/wikipedia/en/thumb/8/84/Mubadala_City_DC_Open_logo.png/120px-Mubadala_City_DC_Open_logo.png"],
+  [["basel", "swiss indoors"],       "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e2/SwissIndoors2026_ATP_Basel.png/250px-SwissIndoors2026_ATP_Basel.png"],
+  [["vienna", "wien", "erste bank"], "https://upload.wikimedia.org/wikipedia/commons/6/62/Logo_Erste_Bank_Open.jpg"],
+  [["beijing", "china open"],        "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c2/China_Open_logo.png/120px-China_Open_logo.png"],
+  // ATP 250
+  [["buenos aires", "argentina open"], "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1d/Logo_IEB%2B_Argentina_Open.jpg/250px-Logo_IEB%2B_Argentina_Open.jpg"],
+  [["bucharest"],                    "https://upload.wikimedia.org/wikipedia/en/thumb/1/13/Bucharest_Open_logo.jpg/250px-Bucharest_Open_logo.jpg"],
+  [["halle"],                        "https://upload.wikimedia.org/wikipedia/en/e/e7/Halle_Open_non_sponsor_logo.jpg"],
+  [["queen", "queens club", "hsbc championship"], "https://upload.wikimedia.org/wikipedia/commons/thumb/3/30/HSBC_Championships_logo_2.jpg/250px-HSBC_Championships_logo_2.jpg"],
+  [["winston-salem", "winston salem"], "https://upload.wikimedia.org/wikipedia/en/9/93/Winston-Salem_Open_Logo.jpg"],
+];
+
+function getTourneyLogo(name: string): string | null {
+  const n = name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  for (const [keywords, url] of TOURNAMENT_LOGOS) {
+    if (keywords.some((k) => n.includes(k))) return url;
+  }
+  return null;
+}
+
+function TourneyTag({ name }: { name: string }) {
+  const [imgError, setImgError] = useState(false);
+  const logo = getTourneyLogo(name);
+  const slug = slugifyTourney(name);
+
+  if (logo && !imgError) {
+    return (
+      <Link
+        href={`/tournament/${slug}`}
+        style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,0.93)", borderRadius: 5, padding: "2px 8px", height: 26, cursor: "pointer", textDecoration: "none", flexShrink: 0 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <img
+          src={logo}
+          alt={name}
+          style={{ height: 18, maxWidth: 72, objectFit: "contain", display: "block" }}
+          onError={() => setImgError(true)}
+        />
+      </Link>
+    );
+  }
+
+  return (
+    <Link href={`/tournament/${slug}`} className="tag tag-g" style={{ textDecoration: "none" }} onClick={(e) => e.stopPropagation()}>
+      {name}
+    </Link>
+  );
+}
+
 function isMainATP(tournament: string) {
   const lower = tournament.toLowerCase();
   return !lower.includes("challenger") && !lower.includes("chall.") && !lower.includes("chall ")
@@ -624,7 +697,7 @@ export default function Home() {
 
                       {/* Torneo + badges */}
                       <div className="flex flex-wrap gap-2 items-center ml-auto">
-                        <Link href={`/tournament/${slugifyTourney(m.tournament)}`} className="tag tag-g" style={{ textDecoration: "none", cursor: "pointer" }}>{m.tournament}</Link>
+                        <TourneyTag name={m.tournament} />
                         {m.round && (
                           <span className="tag" style={/^Q\d?$/i.test(m.round)
                             ? { background: "rgba(255,180,0,0.08)", color: "#f5a623", borderColor: "rgba(255,180,0,0.2)" }
