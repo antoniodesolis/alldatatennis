@@ -527,7 +527,7 @@ export default function Home() {
                         <PlayerPhoto name={m.player1} slug={m.player1Slug} rankingMap={rankingMap} size={52}
                           style={{ opacity: isFinished && m.winner === "player2" ? 0.45 : 1 }} />
                         <div style={{ minWidth: 0 }}>
-                          <div className="fb font-semibold text-base leading-tight"
+                          <div className={`fb text-base leading-tight ${isFinished && m.winner === "player2" ? "font-normal" : "font-semibold"}`}
                             style={{ color: isFinished && m.winner === "player1" ? "var(--acid)" : isFinished && m.winner === "player2" ? "rgba(255,255,255,0.35)" : "white" }}>
                             {m.player1}
                             {isFinished && m.winner === "player1" && <span className="fm text-[9px] ml-1.5" style={{ color: "var(--acid)" }}>✓</span>}
@@ -542,10 +542,10 @@ export default function Home() {
                       <div className="fm text-[10px]" style={{ color: "var(--muted)", flexShrink: 0 }}>VS</div>
                       <a href={`/player/${m.player2Slug}`} onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit", minWidth: 0 }}>
                         <PlayerPhoto name={m.player2} slug={m.player2Slug} rankingMap={rankingMap} size={52}
-                          style={{ opacity: isFinished && m.winner === "player1" ? 0.45 : isFinished ? 1 : 0.75 }} />
+                          style={{ opacity: isFinished && m.winner === "player1" ? 0.45 : 1 }} />
                         <div style={{ minWidth: 0 }}>
-                          <div className="fb font-semibold text-base leading-tight"
-                            style={{ color: isFinished && m.winner === "player2" ? "var(--acid)" : isFinished && m.winner === "player1" ? "rgba(255,255,255,0.35)" : "rgba(255,255,255,0.6)" }}>
+                          <div className={`fb text-base leading-tight ${isFinished && m.winner === "player1" ? "font-normal" : "font-semibold"}`}
+                            style={{ color: isFinished && m.winner === "player2" ? "var(--acid)" : isFinished && m.winner === "player1" ? "rgba(255,255,255,0.35)" : "white" }}>
                             {m.player2}
                             {isFinished && m.winner === "player2" && <span className="fm text-[9px] ml-1.5" style={{ color: "var(--acid)" }}>✓</span>}
                           </div>
