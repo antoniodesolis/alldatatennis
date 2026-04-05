@@ -366,9 +366,12 @@ export default function Home() {
             ))}
             <a href="/historico" className="nav-link">Histórico</a>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: "var(--acid)" }} />
-            <span className="fm text-xs" style={{ color: "var(--acid)" }}>LIVE</span>
+          <div className="flex items-center gap-4">
+            <a href="/historico" className="md:hidden nav-link" style={{ fontSize: "10px", letterSpacing: "0.1em" }}>HISTÓRICO</a>
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: "var(--acid)" }} />
+              <span className="fm text-xs" style={{ color: "var(--acid)" }}>LIVE</span>
+            </div>
           </div>
         </div>
       </nav>

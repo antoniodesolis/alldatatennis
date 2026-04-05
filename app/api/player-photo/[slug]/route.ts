@@ -28,7 +28,7 @@ const LAST: Record<string, string> = {
   marozsan:"m0ci", "diaz-acosta":"d0cg", gomez:"gj16", cina:"c0nb",
   "auger-aliassime":"ag37", gill:"g0eu", jianu:"j09x", misolic:"m0jz",
   cobolli:"c0e9", tiafoe:"td51", maestrelli:"m0if", passaro:"p0ct",
-  cerundolo:"c0au", comesana:"c0df", "ferreira-silva":"sn54",
+  cerundolo:"c0au", "francisco-cerundolo":"c0au", "juan-cerundolo":"c0c8", "juan-manuel-cerundolo":"c0c8", comesana:"c0df", "ferreira-silva":"sn54",
   diallo:"d0f6", monfils:"mc65", onclin:"o0a2", olivieri:"o660",
   loffhagen:"l0cf", cadenasso:"c0nn", bailly:"b0qc",
   "mpetshi-perricard":"m0gz", zeppieri:"z0a1", bueno:"b0gr",
