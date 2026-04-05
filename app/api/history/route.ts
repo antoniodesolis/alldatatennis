@@ -65,8 +65,22 @@ const MONTH_LABELS: Record<string, string> = {
   "09": "Septiembre", "10": "Octubre", "11": "Noviembre", "12": "Diciembre",
 };
 
+// Solo torneos ATP principales (sin challengers, futures, UTR, ITF)
+function isMainATP(tournament: string): boolean {
+  const lower = (tournament ?? "").toLowerCase();
+  return !lower.includes("challenger") && !lower.includes("chall.")
+    && !lower.includes("chall ") && !lower.includes("utr")
+    && !lower.includes("itf") && !lower.includes("futures")
+    && !lower.includes("miyazaki") && !lower.includes("barletta")
+    && !lower.includes("menorca") && !lower.includes("sao leopoldo")
+    && !lower.includes("san luis") && !lower.includes("pro tennis series");
+}
+
 export async function GET() {
   const db = getDb();
+
+  // Solo desde abril 2026 en adelante
+  const FROM_DATE = "2026-04-01";
 
   // Unique predictions: keep most recent per match+player1 combo
   // Join with player_match_stats to resolve winner if not already stored
@@ -92,8 +106,9 @@ export async function GET() {
       AND pms.result    = 'W'
       AND (pms.te_slug = pl.player1_slug OR pms.te_slug = pl.player2_slug)
       AND (pms.opponent_slug = pl.player1_slug OR pms.opponent_slug = pl.player2_slug)
+    WHERE pl.match_date >= ?
     ORDER BY pl.match_date DESC, pl.id DESC
-  `).all() as Array<{
+  `).all(FROM_DATE) as Array<{
     match_id: string;
     match_date: string;
     player1_slug: string;
@@ -116,6 +131,9 @@ export async function GET() {
     const key = `${row.match_id}|${row.player1_slug}`;
     if (seen.has(key)) continue;
     seen.add(key);
+
+    // Filtrar torneos no ATP (challengers, futures, UTR, ITF…)
+    if (!isMainATP(row.tournament)) continue;
 
     // Resolve actual winner: prefer stored, then join result
     let actualWinner = row.actual_winner;
