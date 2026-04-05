@@ -19,7 +19,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db/client";
 import { scrapeTeMonth } from "@/lib/ingest/te-history";
 import { ATP_SLUG_MAP } from "@/lib/analytics/player-resolver";
-import { resolveFinishedMatches, recomputeCalibration, getLearningStats } from "@/lib/learning/feedback";
+import { recomputeCalibration, getLearningStats } from "@/lib/learning/feedback";
 import { backfillOpponentStyles, reclassifyAllStyles } from "@/lib/learning/style-classifier";
 import { getPlayerPatterns, resetPatterns } from "@/lib/analytics/patterns";
 
@@ -142,23 +142,72 @@ function normalizeNewSlugs(): number {
 }
 
 /**
- * Extract finished matches from newly ingested data to resolve predictions.
- * Returns array of {matchId, winnerSlug} for all te_history entries from yesterday.
+ * Resuelve predicciones pendientes para una fecha dada usando JOIN por fecha+slug.
+ *
+ * El match_id del prediction_log (TE live API) nunca coincide con el te_match_id
+ * de player_match_stats (TE history scraper), por lo que no se puede resolver por ID.
+ * En cambio, hacemos el join sobre (match_date, player1_slug/player2_slug, opponent_slug)
+ * para identificar el ganador real de cada partido.
+ *
+ * @returns número de predicciones resueltas
  */
-function getYesterdayFinishedMatches(date: string): Array<{ matchId: string; winnerSlug: string }> {
+function resolveByDateSlug(date: string): number {
   const db = getDb();
-  // Each te_match_id is "{date}_{tournamentSlug}_{matchIndex}" for te_history rows
-  // We need: for each match pair, the winner = the te_slug where result='W'
-  const rows = db.prepare(`
-    SELECT te_match_id, te_slug, result
-    FROM player_match_stats
-    WHERE source = 'te_history' AND match_date = ? AND result = 'W'
-  `).all(date) as { te_match_id: string; te_slug: string; result: string }[];
+  const now = Math.floor(Date.now() / 1000);
 
-  return rows.map((r) => ({
-    matchId: r.te_match_id,
-    winnerSlug: r.te_slug,
-  }));
+  // Obtener predicciones pendientes para esa fecha
+  const pending = db.prepare(`
+    SELECT id, player1_slug, player2_slug, predicted_p1_pct
+    FROM prediction_log
+    WHERE match_date = ? AND resolved_at IS NULL
+  `).all(date) as Array<{
+    id: number;
+    player1_slug: string;
+    player2_slug: string;
+    predicted_p1_pct: number;
+  }>;
+
+  if (pending.length === 0) return 0;
+
+  // Para cada predicción, buscar quién ganó en player_match_stats
+  const findWinner = db.prepare(`
+    SELECT te_slug
+    FROM player_match_stats
+    WHERE match_date = ?
+      AND source = 'te_history'
+      AND result = 'W'
+      AND (te_slug = ? OR te_slug = ?)
+      AND (opponent_slug = ? OR opponent_slug = ?)
+    LIMIT 1
+  `);
+
+  const resolve = db.prepare(`
+    UPDATE prediction_log
+    SET actual_winner = ?, prediction_error = ?, resolved_at = ?
+    WHERE id = ?
+  `);
+
+  let resolved = 0;
+  const run = db.transaction(() => {
+    for (const pred of pending) {
+      const row = findWinner.get(
+        date,
+        pred.player1_slug, pred.player2_slug,
+        pred.player1_slug, pred.player2_slug,
+      ) as { te_slug: string } | undefined;
+
+      if (!row) continue;
+
+      const actualWinner = row.te_slug === pred.player1_slug ? "p1" : "p2";
+      const actualBinary = actualWinner === "p1" ? 1.0 : 0.0;
+      const error = Math.abs(pred.predicted_p1_pct / 100 - actualBinary);
+
+      resolve.run(actualWinner, error, now, pred.id);
+      resolved++;
+    }
+  });
+  run();
+  return resolved;
 }
 
 /** Returns slugs of players who have new data on the given date */
@@ -251,9 +300,10 @@ export async function POST(req: NextRequest) {
   result.backfillStyles = { rowsUpdated: styleRows, reclassified: styleClassified.length };
 
   // ── Paso 5: Resolver predicciones del día ────────────────
-  const finishedMatches = getYesterdayFinishedMatches(targetDate);
-  const resolvedPreds = resolveFinishedMatches(finishedMatches);
-  result.resolvedPredictions = { count: resolvedPreds, finishedMatchesFound: finishedMatches.length };
+  // Usa join por fecha+slug porque los match_id del live API y del history scraper
+  // tienen formatos distintos y nunca coinciden directamente.
+  const resolvedPreds = resolveByDateSlug(targetDate);
+  result.resolvedPredictions = { count: resolvedPreds };
 
   // ── Paso 6: Recalibrar factores ──────────────────────────
   const calibration = recomputeCalibration();
