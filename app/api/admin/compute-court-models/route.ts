@@ -1,11 +1,8 @@
-import { runMigrations } from "../../../../lib/db/schema";
 import { computeAndSaveTournamentModels } from "../../../../lib/analytics/court-speed";
-
-runMigrations();
 
 export async function POST() {
   try {
-    const { computed, models } = computeAndSaveTournamentModels();
+    const { computed, models } = await computeAndSaveTournamentModels();
     const summary = models.slice(0, 10).map((m) => ({
       name: m.tourney_name,
       surface: m.surface,

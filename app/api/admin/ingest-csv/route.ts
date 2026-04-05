@@ -10,11 +10,8 @@
  * AVISO: puede tardar varios minutos la primera vez.
  */
 
-import { runMigrations } from "../../../../lib/db/schema";
 import { ingestSackmannYear, ingestChartingCSV } from "../../../../lib/ingest/sackmann-csv";
 import { getDbStats } from "../../../../lib/db/queries";
-
-runMigrations();
 
 export async function POST(req: Request) {
   let body: { years?: number[]; charting?: boolean } = {};
@@ -42,12 +39,12 @@ export async function POST(req: Request) {
     }
   }
 
-  const db = getDbStats();
+  const db = await getDbStats();
   return Response.json({ ok: true, results, db });
 }
 
 export async function GET() {
-  const db = getDbStats();
+  const db = await getDbStats();
   return Response.json({
     info: "POST { years: [2023,2024], charting: true } para ingestar CSVs históricos",
     db,

@@ -81,7 +81,7 @@ export async function scrapeFinishedMatches(matches: ATPMatch[]): Promise<{ scra
     finished.map(async (m) => {
       const teMatchId = `te_${m.id}`;
 
-      if (isMatchProcessed(teMatchId)) return;
+      if (await isMatchProcessed(teMatchId)) return;
 
       const detail = await fetchMatchDetail(m.id);
       if (!detail) { errors++; return; }
@@ -89,13 +89,11 @@ export async function scrapeFinishedMatches(matches: ATPMatch[]): Promise<{ scra
       const surface = detail.surface ?? m.surface ?? null;
       const round   = detail.round ?? m.round ?? null;
 
-      // Hora y franja horaria
       const matchTime  = m.time ?? null;
       const timeOfDay  = classifyTimeOfDay(matchTime);
 
-      // Registrar jugadores
-      upsertPlayer({ te_slug: m.player1Slug, atp_code: null, full_name: m.player1, sackmann_id: null });
-      upsertPlayer({ te_slug: m.player2Slug, atp_code: null, full_name: m.player2, sackmann_id: null });
+      await upsertPlayer({ te_slug: m.player1Slug, atp_code: null, full_name: m.player1, sackmann_id: null });
+      await upsertPlayer({ te_slug: m.player2Slug, atp_code: null, full_name: m.player2, sackmann_id: null });
 
       const base = {
         te_match_id: teMatchId,
@@ -117,14 +115,14 @@ export async function scrapeFinishedMatches(matches: ATPMatch[]): Promise<{ scra
         bp_converted: null, bp_opportunities: null, court_speed: null,
       };
 
-      upsertMatchStat({
+      await upsertMatchStat({
         ...base,
         te_slug: m.player1Slug,
         opponent_slug: m.player2Slug,
         opponent_style: getPlayerStyle(m.player2Slug),
         result: null,
       });
-      upsertMatchStat({
+      await upsertMatchStat({
         ...base,
         te_slug: m.player2Slug,
         opponent_slug: m.player1Slug,
@@ -132,7 +130,7 @@ export async function scrapeFinishedMatches(matches: ATPMatch[]): Promise<{ scra
         result: null,
       });
 
-      markMatchProcessed(teMatchId, "stats_found");
+      await markMatchProcessed(teMatchId, "stats_found");
       scraped++;
     })
   );

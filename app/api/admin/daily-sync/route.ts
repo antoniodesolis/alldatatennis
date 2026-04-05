@@ -1,18 +1,7 @@
 /**
  * POST /api/admin/daily-sync
  *
- * Pipeline diario completo de retroalimentación. Ejecutar una vez al día
- * (ej. 06:00 AM, cuando los partidos del día anterior ya están terminados).
- *
- * Pasos:
- *   1. Ingestar partidos de ayer (te-history scraper)
- *   2. Enriquecer opponent_rank de las nuevas filas
- *   3. Backfill opponent_style desde patrones y mapa estático
- *   4. Resolver predicciones pendientes (comparar con resultado real)
- *   5. Recalibrar pesos de factores basándose en el historial de errores
- *   6. Invalidar player_patterns de los jugadores afectados (recomputan al siguiente request)
- *
- * GET devuelve el estado del sistema de aprendizaje (stats sin ejecutar el sync).
+ * Pipeline diario completo de retroalimentación.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -23,7 +12,7 @@ import { recomputeCalibration, getLearningStats } from "@/lib/learning/feedback"
 import { backfillOpponentStyles, reclassifyAllStyles } from "@/lib/learning/style-classifier";
 import { getPlayerPatterns, resetPatterns } from "@/lib/analytics/patterns";
 
-// ── ATP_RANK (top-100 atpCode → rank, same as enrich-ranks) ─
+// ── ATP_RANK (top-100 atpCode → rank) ─────────────────────
 const ATP_RANK: Record<string, number> = {
   "a0e2":1,  "s0ag":2,  "z355":3,  "d643":4,  "m0ej":5,  "dh58":6,  "ag37":7,
   "fb98":8,  "s0s1":9,  "mm58":10, "bk92":11, "rh16":12, "c0e9":13, "l0bv":14,
@@ -58,72 +47,106 @@ function median(sorted: number[]): number {
     : sorted[mid];
 }
 
-/** Enriches opponent_rank for all NULL rows via the 6-pass algorithm */
-function enrichNewRanks(): number {
+async function enrichNewRanks(): Promise<number> {
   const db = getDb();
   const slugRankMap = buildSlugRankMap();
   const atpSlugSet = new Set(Object.keys(ATP_SLUG_MAP));
 
-  const updateStmt = db.prepare(
-    "UPDATE player_match_stats SET opponent_rank = ? WHERE source='te_history' AND opponent_slug = ? AND opponent_rank IS NULL"
-  );
-  const peerRankStmt = db.prepare(
-    "SELECT opponent_rank FROM player_match_stats WHERE te_slug = ? AND opponent_rank IS NOT NULL ORDER BY match_date DESC LIMIT 30"
-  );
-  const sackStmt = db.prepare(
-    "SELECT opponent_rank FROM player_match_stats WHERE source='sackmann_csv' AND opponent_slug = ? AND opponent_rank IS NOT NULL ORDER BY match_date DESC LIMIT 1"
-  );
-
-  const getStillNull = () =>
-    (db.prepare(
+  const getStillNull = async () => {
+    const r = await db.execute(
       "SELECT DISTINCT opponent_slug FROM player_match_stats WHERE source='te_history' AND opponent_rank IS NULL AND opponent_slug IS NOT NULL"
-    ).all() as { opponent_slug: string }[]).map((r) => r.opponent_slug);
+    );
+    return (r.rows as unknown as { opponent_slug: string }[]).map((row) => row.opponent_slug);
+  };
 
   let total = 0;
 
-  const run = db.transaction(() => {
+  await db.execute("BEGIN");
+  try {
     // Pass 1: top-100
-    for (const slug of getStillNull()) {
+    for (const slug of await getStillNull()) {
       const rank = slugRankMap.get(slug);
-      if (rank) total += updateStmt.run(rank, slug).changes;
+      if (rank) {
+        const r = await db.execute({
+          sql: "UPDATE player_match_stats SET opponent_rank = ? WHERE source='te_history' AND opponent_slug = ? AND opponent_rank IS NULL",
+          args: [rank, slug],
+        });
+        total += r.rowsAffected;
+      }
     }
     // Pass 2: sackmann
-    for (const slug of getStillNull()) {
-      const row = sackStmt.get(slug) as { opponent_rank: number } | undefined;
-      if (row) total += updateStmt.run(row.opponent_rank, slug).changes;
+    for (const slug of await getStillNull()) {
+      const r = await db.execute({
+        sql: "SELECT opponent_rank FROM player_match_stats WHERE source='sackmann_csv' AND opponent_slug = ? AND opponent_rank IS NOT NULL ORDER BY match_date DESC LIMIT 1",
+        args: [slug],
+      });
+      const row = r.rows[0] as unknown as { opponent_rank: number } | undefined;
+      if (row) {
+        const upd = await db.execute({
+          sql: "UPDATE player_match_stats SET opponent_rank = ? WHERE source='te_history' AND opponent_slug = ? AND opponent_rank IS NULL",
+          args: [row.opponent_rank, slug],
+        });
+        total += upd.rowsAffected;
+      }
     }
     // Pass 3: peer inference ≥3
-    for (const slug of getStillNull()) {
-      const rows = peerRankStmt.all(slug) as { opponent_rank: number }[];
+    for (const slug of await getStillNull()) {
+      const r = await db.execute({
+        sql: "SELECT opponent_rank FROM player_match_stats WHERE te_slug = ? AND opponent_rank IS NOT NULL ORDER BY match_date DESC LIMIT 30",
+        args: [slug],
+      });
+      const rows = r.rows as unknown as { opponent_rank: number }[];
       if (rows.length >= 3) {
-        const sorted = rows.map((r) => r.opponent_rank).sort((a, b) => a - b);
-        total += updateStmt.run(median(sorted), slug).changes;
+        const sorted = rows.map((row) => row.opponent_rank).sort((a, b) => a - b);
+        const upd = await db.execute({
+          sql: "UPDATE player_match_stats SET opponent_rank = ? WHERE source='te_history' AND opponent_slug = ? AND opponent_rank IS NULL",
+          args: [median(sorted), slug],
+        });
+        total += upd.rowsAffected;
       }
     }
     // Pass 4: ATP map default 150
-    for (const slug of getStillNull()) {
-      if (atpSlugSet.has(slug)) total += updateStmt.run(150, slug).changes;
+    for (const slug of await getStillNull()) {
+      if (atpSlugSet.has(slug)) {
+        const upd = await db.execute({
+          sql: "UPDATE player_match_stats SET opponent_rank = ? WHERE source='te_history' AND opponent_slug = ? AND opponent_rank IS NULL",
+          args: [150, slug],
+        });
+        total += upd.rowsAffected;
+      }
     }
     // Pass 5: peer inference ≥1
-    for (const slug of getStillNull()) {
-      const rows = peerRankStmt.all(slug) as { opponent_rank: number }[];
+    for (const slug of await getStillNull()) {
+      const r = await db.execute({
+        sql: "SELECT opponent_rank FROM player_match_stats WHERE te_slug = ? AND opponent_rank IS NOT NULL ORDER BY match_date DESC LIMIT 30",
+        args: [slug],
+      });
+      const rows = r.rows as unknown as { opponent_rank: number }[];
       if (rows.length >= 1) {
-        const sorted = rows.map((r) => r.opponent_rank).sort((a, b) => a - b);
-        total += updateStmt.run(median(sorted), slug).changes;
+        const sorted = rows.map((row) => row.opponent_rank).sort((a, b) => a - b);
+        const upd = await db.execute({
+          sql: "UPDATE player_match_stats SET opponent_rank = ? WHERE source='te_history' AND opponent_slug = ? AND opponent_rank IS NULL",
+          args: [median(sorted), slug],
+        });
+        total += upd.rowsAffected;
       }
     }
     // Pass 6: universal default 250
-    total += db.prepare(
+    const upd6 = await db.execute(
       "UPDATE player_match_stats SET opponent_rank = 250 WHERE source='te_history' AND opponent_rank IS NULL AND opponent_slug IS NOT NULL"
-    ).run().changes;
-  });
+    );
+    total += upd6.rowsAffected;
 
-  run();
+    await db.execute("COMMIT");
+  } catch (e) {
+    await db.execute("ROLLBACK");
+    throw e;
+  }
+
   return total;
 }
 
-/** Merge alias slugs that may have been introduced by new TE data */
-function normalizeNewSlugs(): number {
+async function normalizeNewSlugs(): Promise<number> {
   const db = getDb();
   const SLUG_MERGES: Record<string, string> = {
     "de-minaur":         "minaur",
@@ -131,36 +154,42 @@ function normalizeNewSlugs(): number {
     "carabelli":         "ugo-carabelli",
   };
   let updated = 0;
-  const run = db.transaction(() => {
+
+  await db.execute("BEGIN");
+  try {
     for (const [alias, canonical] of Object.entries(SLUG_MERGES)) {
-      updated += db.prepare("UPDATE player_match_stats SET te_slug = ? WHERE te_slug = ?").run(canonical, alias).changes;
-      updated += db.prepare("UPDATE player_match_stats SET opponent_slug = ? WHERE opponent_slug = ?").run(canonical, alias).changes;
+      const r1 = await db.execute({
+        sql: "UPDATE player_match_stats SET te_slug = ? WHERE te_slug = ?",
+        args: [canonical, alias],
+      });
+      const r2 = await db.execute({
+        sql: "UPDATE player_match_stats SET opponent_slug = ? WHERE opponent_slug = ?",
+        args: [canonical, alias],
+      });
+      updated += r1.rowsAffected + r2.rowsAffected;
     }
-  });
-  run();
+    await db.execute("COMMIT");
+  } catch (e) {
+    await db.execute("ROLLBACK");
+    throw e;
+  }
+
   return updated;
 }
 
-/**
- * Resuelve predicciones pendientes para una fecha dada usando JOIN por fecha+slug.
- *
- * El match_id del prediction_log (TE live API) nunca coincide con el te_match_id
- * de player_match_stats (TE history scraper), por lo que no se puede resolver por ID.
- * En cambio, hacemos el join sobre (match_date, player1_slug/player2_slug, opponent_slug)
- * para identificar el ganador real de cada partido.
- *
- * @returns número de predicciones resueltas
- */
-function resolveByDateSlug(date: string): number {
+async function resolveByDateSlug(date: string): Promise<number> {
   const db = getDb();
   const now = Math.floor(Date.now() / 1000);
 
-  // Obtener predicciones pendientes para esa fecha
-  const pending = db.prepare(`
-    SELECT id, player1_slug, player2_slug, predicted_p1_pct
-    FROM prediction_log
-    WHERE match_date = ? AND resolved_at IS NULL
-  `).all(date) as Array<{
+  const pendingResult = await db.execute({
+    sql: `
+      SELECT id, player1_slug, player2_slug, predicted_p1_pct
+      FROM prediction_log
+      WHERE match_date = ? AND resolved_at IS NULL
+    `,
+    args: [date],
+  });
+  const pending = pendingResult.rows as unknown as Array<{
     id: number;
     player1_slug: string;
     player2_slug: string;
@@ -169,69 +198,60 @@ function resolveByDateSlug(date: string): number {
 
   if (pending.length === 0) return 0;
 
-  // Para cada predicción, buscar quién ganó en player_match_stats
-  const findWinner = db.prepare(`
-    SELECT te_slug
-    FROM player_match_stats
-    WHERE match_date = ?
-      AND source = 'te_history'
-      AND result = 'W'
-      AND (te_slug = ? OR te_slug = ?)
-      AND (opponent_slug = ? OR opponent_slug = ?)
-    LIMIT 1
-  `);
-
-  const resolve = db.prepare(`
-    UPDATE prediction_log
-    SET actual_winner = ?, prediction_error = ?, resolved_at = ?
-    WHERE id = ?
-  `);
-
   let resolved = 0;
-  const run = db.transaction(() => {
+  await db.execute("BEGIN");
+  try {
     for (const pred of pending) {
-      const row = findWinner.get(
-        date,
-        pred.player1_slug, pred.player2_slug,
-        pred.player1_slug, pred.player2_slug,
-      ) as { te_slug: string } | undefined;
-
+      const winnerResult = await db.execute({
+        sql: `
+          SELECT te_slug
+          FROM player_match_stats
+          WHERE match_date = ?
+            AND source = 'te_history'
+            AND result = 'W'
+            AND (te_slug = ? OR te_slug = ?)
+            AND (opponent_slug = ? OR opponent_slug = ?)
+          LIMIT 1
+        `,
+        args: [date, pred.player1_slug, pred.player2_slug, pred.player1_slug, pred.player2_slug],
+      });
+      const row = winnerResult.rows[0] as unknown as { te_slug: string } | undefined;
       if (!row) continue;
 
       const actualWinner = row.te_slug === pred.player1_slug ? "p1" : "p2";
       const actualBinary = actualWinner === "p1" ? 1.0 : 0.0;
       const error = Math.abs(pred.predicted_p1_pct / 100 - actualBinary);
 
-      resolve.run(actualWinner, error, now, pred.id);
+      await db.execute({
+        sql: "UPDATE prediction_log SET actual_winner = ?, prediction_error = ?, resolved_at = ? WHERE id = ?",
+        args: [actualWinner, error, now, pred.id],
+      });
       resolved++;
     }
-  });
-  run();
+    await db.execute("COMMIT");
+  } catch (e) {
+    await db.execute("ROLLBACK");
+    throw e;
+  }
+
   return resolved;
 }
 
-/** Returns slugs of players who have new data on the given date */
-function getAffectedSlugs(date: string): string[] {
+async function getAffectedSlugs(date: string): Promise<string[]> {
   const db = getDb();
-  const rows = db.prepare(`
-    SELECT DISTINCT te_slug FROM player_match_stats
-    WHERE match_date = ? AND source = 'te_history'
-  `).all(date) as { te_slug: string }[];
-  return rows.map((r) => r.te_slug);
+  const result = await db.execute({
+    sql: "SELECT DISTINCT te_slug FROM player_match_stats WHERE match_date = ? AND source = 'te_history'",
+    args: [date],
+  });
+  return (result.rows as unknown as { te_slug: string }[]).map((r) => r.te_slug);
 }
 
-/**
- * Recompute patterns for a list of slugs immediately (eager, not lazy).
- * Each call to getPlayerPatterns with a stale/missing cache forces a fresh computation.
- */
 async function recomputePatternsForSlugs(slugs: string[]): Promise<{ recomputed: number; errors: number }> {
   let recomputed = 0;
   let errors = 0;
   for (const slug of slugs) {
     try {
-      // Force fresh computation: delete existing cache first
-      resetPatterns(slug);
-      // Recompute for all surfaces (global '' + surface-specific splits used in predictions)
+      await resetPatterns(slug);
       await getPlayerPatterns(slug, "", 50);
       await getPlayerPatterns(slug, "", 30);
       recomputed++;
@@ -245,7 +265,7 @@ async function recomputePatternsForSlugs(slugs: string[]): Promise<{ recomputed:
 // ── GET: estado del sistema de aprendizaje ────────────────
 
 export async function GET() {
-  const stats = getLearningStats();
+  const stats = await getLearningStats();
   return NextResponse.json({ ok: true, learningStats: stats });
 }
 
@@ -254,7 +274,6 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({})) as { date?: string; dryRun?: boolean };
 
-  // Fecha a ingestar (por defecto ayer)
   const targetDate = body.date ?? (() => {
     const d = new Date();
     d.setDate(d.getDate() - 1);
@@ -267,7 +286,7 @@ export async function POST(req: NextRequest) {
   const result: Record<string, unknown> = { date: targetDate, dryRun };
 
   if (dryRun) {
-    const stats = getLearningStats();
+    const stats = await getLearningStats();
     return NextResponse.json({ ok: true, dryRun: true, learningStats: stats });
   }
 
@@ -284,29 +303,25 @@ export async function POST(req: NextRequest) {
     result.ingest = { error: (err as Error).message };
   }
 
-  // ── Paso 2: Normalizar slugs (alias → canonical) ─────────
-  const normalizeUpdated = normalizeNewSlugs();
+  // ── Paso 2: Normalizar slugs ─────────────────────────────
+  const normalizeUpdated = await normalizeNewSlugs();
   result.normalize = { rowsUpdated: normalizeUpdated };
 
   // ── Paso 3: Enriquecer opponent_rank ────────────────────
-  const rankRows = enrichNewRanks();
+  const rankRows = await enrichNewRanks();
   result.enrichRanks = { rowsUpdated: rankRows };
 
   // ── Paso 4: Backfill + reclasificación de estilos ────────
-  // Actualiza opponent_style en filas sin dato + reclasifica todos los jugadores
-  // con patrones ya computados para que el registro histórico sea más preciso
-  const styleRows = backfillOpponentStyles();
-  const styleClassified = reclassifyAllStyles();
+  const styleRows = await backfillOpponentStyles();
+  const styleClassified = await reclassifyAllStyles();
   result.backfillStyles = { rowsUpdated: styleRows, reclassified: styleClassified.length };
 
   // ── Paso 5: Resolver predicciones del día ────────────────
-  // Usa join por fecha+slug porque los match_id del live API y del history scraper
-  // tienen formatos distintos y nunca coinciden directamente.
-  const resolvedPreds = resolveByDateSlug(targetDate);
+  const resolvedPreds = await resolveByDateSlug(targetDate);
   result.resolvedPredictions = { count: resolvedPreds };
 
   // ── Paso 6: Recalibrar factores ──────────────────────────
-  const calibration = recomputeCalibration();
+  const calibration = await recomputeCalibration();
   result.calibration = Object.fromEntries(
     Object.entries(calibration).map(([id, c]) => [id, {
       samples: c.sample_count,
@@ -315,10 +330,8 @@ export async function POST(req: NextRequest) {
     }])
   );
 
-  // ── Paso 7: Recomputar análisis de jugadores afectados ───
-  // No solo invalida — fuerza recalculo inmediato de patrones con los datos nuevos
-  // para que las fichas y predicciones reflejen el partido recién añadido
-  const affectedSlugs = getAffectedSlugs(targetDate);
+  // ── Paso 7: Recomputar patrones de jugadores afectados ───
+  const affectedSlugs = await getAffectedSlugs(targetDate);
   const patternResult = await recomputePatternsForSlugs(affectedSlugs);
   result.patternsRecomputed = {
     players: affectedSlugs.length,
@@ -328,7 +341,7 @@ export async function POST(req: NextRequest) {
   };
 
   // ── Resumen ───────────────────────────────────────────────
-  const stats = getLearningStats();
+  const stats = await getLearningStats();
   result.learningStats = {
     totalPredictions: stats.totalPredictions,
     resolved: stats.resolved,

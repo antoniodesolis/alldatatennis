@@ -21,15 +21,12 @@ export interface PostMatchNote {
   winnerSlug:   string;
   loserSlug:    string;
   actualPattern: MatchPattern;
-  // Si había predicción registrada
   predictedWinner?: "p1" | "p2" | null;
   actualWinner?: "p1" | "p2" | null;
   predictionCorrect?: boolean;
   predictedPct?: number;
-  // Factores que apoyaban al ganador real (de factors_json)
   factorsForWinner: string[];
   factorsAgainstWinner: string[];
-  // Discrepancias tácticamente interesantes
   learningNote: string;
 }
 
@@ -106,29 +103,26 @@ function buildLearningNote(
 
 // ── API pública ───────────────────────────────────────────
 
-/**
- * Procesa el aprendizaje post-partido para una entrada de match_insights.
- * Se llama desde enrich-matches después de guardar el insight.
- */
-export function processPostMatchLearning(
+export async function processPostMatchLearning(
   matchId: string,
   matchDate: string,
   winnerSlug: string,
   loserSlug: string,
   actualPattern: MatchPattern,
-): PostMatchNote {
+): Promise<PostMatchNote> {
   const db = getDb();
 
-  // Buscar la predicción registrada para este partido
-  // La predicción se guarda con player1_slug = el que figure primero en nuestra lista
-  const predRows = db.prepare(`
-    SELECT * FROM prediction_log
-    WHERE match_id = ?
-       OR (player1_slug = ? AND player2_slug = ?)
-       OR (player1_slug = ? AND player2_slug = ?)
-    LIMIT 1
-  `).all(matchId, winnerSlug, loserSlug, loserSlug, winnerSlug) as PredictionLogRow[];
-
+  const predResult = await db.execute({
+    sql: `
+      SELECT * FROM prediction_log
+      WHERE match_id = ?
+         OR (player1_slug = ? AND player2_slug = ?)
+         OR (player1_slug = ? AND player2_slug = ?)
+      LIMIT 1
+    `,
+    args: [matchId, winnerSlug, loserSlug, loserSlug, winnerSlug],
+  });
+  const predRows = predResult.rows as unknown as PredictionLogRow[];
   const pred = predRows[0] ?? null;
 
   let predictionCorrect: boolean | undefined;
@@ -141,21 +135,15 @@ export function processPostMatchLearning(
     const predictedP1Pct = pred.predicted_p1_pct;
     predictedPct = predictedP1Pct;
 
-    // Determinar quién es p1 y p2 en la predicción
     const winnerIsP1 = pred.player1_slug === winnerSlug;
-    const winnerPredictedPct = winnerIsP1 ? predictedP1Pct : 100 - predictedP1Pct;
-
-    // ¿Predijimos al ganador correcto?
     predictedWinner = winnerIsP1 ? "p1" : "p2";
     const predictedFavorite: "p1" | "p2" = predictedP1Pct >= 50 ? "p1" : "p2";
     predictionCorrect = predictedFavorite === predictedWinner;
 
-    // Si la predicción estaba resuelta, actualizar
     if (pred.actual_winner) {
       predictionCorrect = pred.actual_winner === predictedWinner.toString();
     }
 
-    // Analizar factores
     const factors = parseFactors(pred.factors_json);
     for (const f of factors) {
       if (!f.hasData || f.effectiveWeight < 0.03) continue;
@@ -173,21 +161,22 @@ export function processPostMatchLearning(
     actualPattern, factorsForWinner, factorsAgainstWinner,
   );
 
-  // ── Actualizar player_insights con la nota de aprendizaje ─
-  updatePlayerInsightsWithLearning(winnerSlug, learningNote, actualPattern, true);
-  updatePlayerInsightsWithLearning(loserSlug, learningNote, actualPattern, false);
+  await updatePlayerInsightsWithLearning(winnerSlug, learningNote, actualPattern, true);
+  await updatePlayerInsightsWithLearning(loserSlug, learningNote, actualPattern, false);
 
-  // ── Actualizar prediction_log con el actual_winner si no estaba ─
   if (pred && !pred.actual_winner) {
     const actualWinnerField: "p1" | "p2" = pred.player1_slug === winnerSlug ? "p1" : "p2";
     const predBinary = actualWinnerField === "p1" ? 1 : 0;
     const predPct = pred.predicted_p1_pct / 100;
     const error = Math.abs(predPct - predBinary);
-    db.prepare(`
-      UPDATE prediction_log
-      SET actual_winner = ?, prediction_error = ?, resolved_at = unixepoch()
-      WHERE match_id = ?
-    `).run(actualWinnerField, error, pred.match_id);
+    await db.execute({
+      sql: `
+        UPDATE prediction_log
+        SET actual_winner = ?, prediction_error = ?, resolved_at = unixepoch()
+        WHERE match_id = ?
+      `,
+      args: [actualWinnerField, error, pred.match_id],
+    });
   }
 
   return {
@@ -199,37 +188,32 @@ export function processPostMatchLearning(
   };
 }
 
-function updatePlayerInsightsWithLearning(
+async function updatePlayerInsightsWithLearning(
   slug: string,
   note: string,
   pattern: MatchPattern,
   isWinner: boolean,
-): void {
-  const acc: AccumulatedInsights = getPlayerInsights(slug);
+): Promise<void> {
+  const acc: AccumulatedInsights = await getPlayerInsights(slug);
 
-  // Añadir nota de aprendizaje como observación táctica reciente
   const tag = isWinner ? "[ganó]" : "[perdió]";
   const taggedNote = `${tag} ${note}`;
 
-  // Guardar en un campo separado dentro del JSON acumulado
   const extended = acc as AccumulatedInsights & { postMatchNotes?: string[] };
   if (!extended.postMatchNotes) extended.postMatchNotes = [];
   extended.postMatchNotes = [taggedNote, ...extended.postMatchNotes].slice(0, 10);
 
-  savePlayerInsights(slug, extended);
+  await savePlayerInsights(slug, extended);
 }
 
-/**
- * Genera un resumen de aprendizaje para un jugador: qué hemos acertado y fallado.
- */
-export function getPlayerLearningReport(slug: string): {
+export async function getPlayerLearningReport(slug: string): Promise<{
   matchCount: number;
   correctPredictions: number;
   incorrectPredictions: number;
   patternDistribution: Record<string, number>;
   recentNotes: string[];
-} {
-  const acc = getPlayerInsights(slug) as AccumulatedInsights & { postMatchNotes?: string[] };
+}> {
+  const acc = await getPlayerInsights(slug) as AccumulatedInsights & { postMatchNotes?: string[] };
   const notes = acc.postMatchNotes ?? [];
 
   const correct   = notes.filter((n) => n.includes("correcta")).length;

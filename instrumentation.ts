@@ -8,7 +8,7 @@ export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
   const { runMigrations } = await import("./lib/db/schema");
-  runMigrations();
+  await runMigrations();
   console.log("[instrumentation] Migraciones SQLite aplicadas.");
 
   const { startStatsPoller } = await import("./lib/stats-poller");

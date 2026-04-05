@@ -91,23 +91,26 @@ export function baselineVsRankBracket(
  * Calcula el nivel de confianza de un jugador basado en sus partidos ATP en DB.
  * Consulta player_match_stats directamente (no usa caché de patrones).
  */
-export function computePlayerConfidence(slug: string): PlayerConfidence {
+export async function computePlayerConfidence(slug: string): Promise<PlayerConfidence> {
   const db = getDb();
 
   // Contar partidos ATP main tour (excluir "other" = Challenger/ITF que se cuele)
-  const stats = db.prepare(`
-    SELECT
-      COUNT(*) as total,
-      SUM(CASE WHEN tourney_level IN ('grand-slam','masters-1000','atp-500','atp-250','atp-finals') THEN 1 ELSE 0 END) as atp_main,
-      SUM(CASE WHEN tourney_level IN ('atp-250','other') THEN 1 ELSE 0 END) as lower_tier,
-      AVG(CASE WHEN opponent_rank IS NOT NULL THEN opponent_rank END) as avg_opp_rank,
-      -- Estimación del ranking propio: mediana del ranking registrado cuando otros jugaron vs él
-      (SELECT AVG(opponent_rank) FROM player_match_stats
-       WHERE opponent_slug = ? AND opponent_rank IS NOT NULL
-       ORDER BY match_date DESC LIMIT 10) as estimated_rank
-    FROM player_match_stats
-    WHERE te_slug = ? AND result IS NOT NULL
-  `).get(slug, slug) as {
+  const statsResult = await db.execute({
+    sql: `
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN tourney_level IN ('grand-slam','masters-1000','atp-500','atp-250','atp-finals') THEN 1 ELSE 0 END) as atp_main,
+        SUM(CASE WHEN tourney_level IN ('atp-250','other') THEN 1 ELSE 0 END) as lower_tier,
+        AVG(CASE WHEN opponent_rank IS NOT NULL THEN opponent_rank END) as avg_opp_rank,
+        (SELECT AVG(opponent_rank) FROM player_match_stats
+         WHERE opponent_slug = ? AND opponent_rank IS NOT NULL
+         ORDER BY match_date DESC LIMIT 10) as estimated_rank
+      FROM player_match_stats
+      WHERE te_slug = ? AND result IS NOT NULL
+    `,
+    args: [slug, slug],
+  });
+  const stats = statsResult.rows[0] as unknown as {
     total: number; atp_main: number; lower_tier: number;
     avg_opp_rank: number | null; estimated_rank: number | null;
   };

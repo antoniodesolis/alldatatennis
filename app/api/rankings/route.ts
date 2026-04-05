@@ -176,21 +176,29 @@ export function parseRankings(html: string): ATPPlayer[] {
 }
 
 /** Guarda rankings en DB (reemplaza todos los del timestamp actual) */
-export function saveRankingsToDB(players: ATPPlayer[]): void {
+export async function saveRankingsToDB(players: ATPPlayer[]): Promise<void> {
   try {
-    runMigrations();
+    await runMigrations();
     const db = getDb();
     const now = Math.floor(Date.now() / 1000);
-    // Borrar rankings con el mismo segundo (por si se llama dos veces) y los de hace > 30 días
-    db.exec(`DELETE FROM atp_rankings WHERE updated_at <= ${now - 30 * 24 * 3600}`);
-    const insert = db.prepare(
-      `INSERT OR REPLACE INTO atp_rankings (rank, atp_code, name, country, points, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    );
-    const insertMany = db.transaction((rows: ATPPlayer[]) => {
-      for (const p of rows) insert.run(p.rank, p.atpCode, p.name, p.country, p.points, now);
+    await db.execute({
+      sql: `DELETE FROM atp_rankings WHERE updated_at <= ?`,
+      args: [now - 30 * 24 * 3600],
     });
-    insertMany(players);
+    await db.execute("BEGIN");
+    try {
+      for (const p of players) {
+        await db.execute({
+          sql: `INSERT OR REPLACE INTO atp_rankings (rank, atp_code, name, country, points, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)`,
+          args: [p.rank, p.atpCode, p.name, p.country, p.points, now],
+        });
+      }
+      await db.execute("COMMIT");
+    } catch (e) {
+      await db.execute("ROLLBACK");
+      throw e;
+    }
     console.log(`[rankings] ${players.length} rankings guardados en DB (ts=${now})`);
   } catch (e) {
     console.warn("[rankings] Error guardando en DB:", (e as Error).message);
@@ -198,19 +206,20 @@ export function saveRankingsToDB(players: ATPPlayer[]): void {
 }
 
 /** Lee los rankings más recientes de la DB */
-export function loadRankingsFromDB(): { players: ATPPlayer[]; updatedAt: number } | null {
+export async function loadRankingsFromDB(): Promise<{ players: ATPPlayer[]; updatedAt: number } | null> {
   try {
-    runMigrations();
+    await runMigrations();
     const db = getDb();
-    const latest = db.prepare(
-      `SELECT MAX(updated_at) as ts FROM atp_rankings`
-    ).get() as { ts: number | null };
+    const latestResult = await db.execute(`SELECT MAX(updated_at) as ts FROM atp_rankings`);
+    const latest = latestResult.rows[0] as unknown as { ts: number | null };
     if (!latest?.ts) return null;
 
-    const rows = db.prepare(
-      `SELECT rank, atp_code, name, country, points FROM atp_rankings
-       WHERE updated_at = ? ORDER BY rank ASC`
-    ).all(latest.ts) as Array<{ rank: number; atp_code: string; name: string; country: string; points: string }>;
+    const rowsResult = await db.execute({
+      sql: `SELECT rank, atp_code, name, country, points FROM atp_rankings
+            WHERE updated_at = ? ORDER BY rank ASC`,
+      args: [latest.ts],
+    });
+    const rows = rowsResult.rows as unknown as Array<{ rank: number; atp_code: string; name: string; country: string; points: string }>;
 
     if (rows.length < 20) return null;
     const players: ATPPlayer[] = rows.map((r) => ({
@@ -257,7 +266,7 @@ export async function GET() {
   try {
     const players = await scrapeRankings();
     if (players) {
-      saveRankingsToDB(players);
+      await saveRankingsToDB(players);
       cache = { players, ts: Date.now(), source: "live" };
       return Response.json({ players, source: "live", updatedAt: Math.floor(Date.now() / 1000) });
     }
@@ -266,7 +275,7 @@ export async function GET() {
   }
 
   // 3. Rankings persistidos en DB
-  const dbData = loadRankingsFromDB();
+  const dbData = await loadRankingsFromDB();
   if (dbData) {
     const ageS = Math.floor(Date.now() / 1000) - dbData.updatedAt;
     if (ageS < DB_MAX_AGE_S) {

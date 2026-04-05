@@ -1,8 +1,5 @@
-import { runMigrations } from "../../../../../lib/db/schema";
 import { getPlayerMatches, countPlayerMatches, getPlayer } from "../../../../../lib/db/queries";
 import { canonicalSlug } from "../../../../../lib/analytics/player-resolver";
-
-runMigrations();
 
 export async function GET(
   _req: Request,
@@ -20,9 +17,11 @@ export async function GET(
   const limit   = parseInt(url.searchParams.get("limit") ?? "50");
   const season  = url.searchParams.get("season") ? parseInt(url.searchParams.get("season")!) : undefined;
 
-  const player  = getPlayer(slug);
-  const matches = getPlayerMatches(slug, { surface, limit, season });
-  const total   = countPlayerMatches(slug);
+  const [player, matches, total] = await Promise.all([
+    getPlayer(slug),
+    getPlayerMatches(slug, { surface, limit, season }),
+    countPlayerMatches(slug),
+  ]);
 
   return Response.json({ slug, player, total, matches }, {
     headers: { "Cache-Control": "private, max-age=60" },

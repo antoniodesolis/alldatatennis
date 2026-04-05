@@ -59,13 +59,13 @@ export interface MatchupConditions {
 
 // ── Análisis principal ────────────────────────────────────
 
-export function analyzeMatchup(
+export async function analyzeMatchup(
   p1Slug: string,
   p2Slug: string,
   p1Patterns: PlayerPatterns | null,
   p2Patterns: PlayerPatterns | null,
   conditions: MatchupConditions,
-): MatchupIntelligence {
+): Promise<MatchupIntelligence> {
   // Obtener perfiles (fallback a genérico si no existe)
   const style1 = inferStyle(p1Patterns);
   const style2 = inferStyle(p2Patterns);
@@ -85,8 +85,10 @@ export function analyzeMatchup(
   let p1Profile = p1ProfileBase;
   let p2Profile = p2ProfileBase;
   try {
-    const p1Insights = getPlayerInsights(p1Slug);
-    const p2Insights = getPlayerInsights(p2Slug);
+    const [p1Insights, p2Insights] = await Promise.all([
+      getPlayerInsights(p1Slug),
+      getPlayerInsights(p2Slug),
+    ]);
     p1Profile = enrichProfileWithInsights(p1ProfileBase, p1Insights);
     p2Profile = enrichProfileWithInsights(p2ProfileBase, p2Insights);
   } catch { /* insights no disponibles — usar perfiles base */ }

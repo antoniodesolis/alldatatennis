@@ -1,25 +1,13 @@
 /**
  * POST /api/admin/enrich-ranks
  *
- * Enriches opponent_rank = NULL rows in te_history using 4 passes:
- *
- *  Pass 1 — STATIC_TOP100 + ATP_SLUG_MAP: exact rank for top-100 players
- *  Pass 2 — sackmann_csv: most-recent known rank from historical data (2023-2024)
- *  Pass 3 — Peer inference: for slugs that appear as te_slug in the DB,
- *            estimate their rank = ROUND(median opponent_rank from their own matches).
- *            Principle: ATP players face similar-ranked opponents → avg opponent rank ≈ own rank.
- *  Pass 4 — ATP_SLUG_MAP default: any slug in ATP_SLUG_MAP (= confirmed ATP circuit player)
- *            but outside top-100 and unresolved → assign rank 150 as conservative estimate.
- *
- * After enrichment, invalidates all player_patterns so they recompute with
- * the newly available opponent_rank data (opponentRankSplits, qualityWinRate).
+ * Enriches opponent_rank = NULL rows in te_history using 6 passes.
  */
 
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db/client";
 import { ATP_SLUG_MAP } from "@/lib/analytics/player-resolver";
 
-// STATIC_TOP100 atpCode → rank map
 const ATP_RANK: Record<string, number> = {
   "a0e2":1,  "s0ag":2,  "z355":3,  "d643":4,  "m0ej":5,  "dh58":6,  "ag37":7,
   "fb98":8,  "s0s1":9,  "mm58":10, "bk92":11, "rh16":12, "c0e9":13, "l0bv":14,
@@ -38,7 +26,6 @@ const ATP_RANK: Record<string, number> = {
   "d0c1":99, "gd64":100,
 };
 
-// Build te_slug → rank from ATP_SLUG_MAP + ATP_RANK
 function buildSlugRankMap(): Map<string, number> {
   const map = new Map<string, number>();
   for (const [slug, code] of Object.entries(ATP_SLUG_MAP)) {
@@ -48,7 +35,6 @@ function buildSlugRankMap(): Map<string, number> {
   return map;
 }
 
-/** Compute median of a sorted array */
 function median(sorted: number[]): number {
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 0
@@ -58,12 +44,14 @@ function median(sorted: number[]): number {
 
 export async function GET() {
   return NextResponse.json({
-    description: "POST to enrich opponent_rank = NULL rows in te_history (4 passes)",
+    description: "POST to enrich opponent_rank = NULL rows in te_history (6 passes)",
     passes: [
       "1. STATIC_TOP100 + ATP_SLUG_MAP → exact rank for top-100",
       "2. sackmann_csv → most recent historical rank",
-      "3. Peer inference → median opponent_rank from player's own matches",
-      "4. ATP_SLUG_MAP default → rank 150 for confirmed ATP players not resolved",
+      "3. Peer inference ≥3 matches",
+      "4. ATP_SLUG_MAP default → rank 150",
+      "5. Peer inference ≥1 match",
+      "6. Universal default 250",
     ],
   });
 }
@@ -71,127 +59,97 @@ export async function GET() {
 export async function POST() {
   const db = getDb();
   const slugRankMap = buildSlugRankMap();
+  const atpSlugSet = new Set(Object.keys(ATP_SLUG_MAP));
 
-  const nullCount = (db.prepare(
+  const nullCountResult = await db.execute(
     "SELECT COUNT(*) as n FROM player_match_stats WHERE source='te_history' AND opponent_rank IS NULL AND opponent_slug IS NOT NULL"
-  ).get() as { n: number }).n;
+  );
+  const nullCount = (nullCountResult.rows[0] as unknown as { n: number }).n;
 
   if (nullCount === 0) {
     return NextResponse.json({ ok: true, updated: 0, message: "No rows to enrich" });
   }
 
-  // Shared update statement (reused in every pass)
-  const updateStmt = db.prepare(
-    "UPDATE player_match_stats SET opponent_rank = ? WHERE source='te_history' AND opponent_slug = ? AND opponent_rank IS NULL"
-  );
-
-  const getStillNull = () =>
-    (db.prepare(
+  const getStillNull = async () => {
+    const r = await db.execute(
       "SELECT DISTINCT opponent_slug FROM player_match_stats WHERE source='te_history' AND opponent_rank IS NULL AND opponent_slug IS NOT NULL"
-    ).all() as { opponent_slug: string }[]).map((r) => r.opponent_slug);
+    );
+    return (r.rows as unknown as { opponent_slug: string }[]).map((row) => row.opponent_slug);
+  };
 
-  let updatedPass1 = 0;
-  let updatedPass2 = 0;
-  let updatedPass3 = 0;
-  let updatedPass4 = 0;
+  const updateRank = async (rank: number, slug: string) => {
+    const r = await db.execute({
+      sql: "UPDATE player_match_stats SET opponent_rank = ? WHERE source='te_history' AND opponent_slug = ? AND opponent_rank IS NULL",
+      args: [rank, slug],
+    });
+    return r.rowsAffected;
+  };
 
-  // ── Pass 1: STATIC_TOP100 via ATP_SLUG_MAP ────────────────
-  const pass1 = db.transaction(() => {
-    for (const slug of getStillNull()) {
-      const rank = slugRankMap.get(slug);
-      if (rank !== undefined) updatedPass1 += updateStmt.run(rank, slug).changes;
-    }
-  });
-  pass1();
+  let updatedPass1 = 0, updatedPass2 = 0, updatedPass3 = 0;
+  let updatedPass4 = 0, updatedPass5 = 0, updatedPass6 = 0;
 
-  // ── Pass 2: sackmann_csv historical rank ──────────────────
-  const sackStmt = db.prepare(
-    `SELECT opponent_rank FROM player_match_stats
-     WHERE source='sackmann_csv' AND opponent_slug = ? AND opponent_rank IS NOT NULL
-     ORDER BY match_date DESC LIMIT 1`
+  // Pass 1: top-100
+  for (const slug of await getStillNull()) {
+    const rank = slugRankMap.get(slug);
+    if (rank !== undefined) updatedPass1 += await updateRank(rank, slug);
+  }
+
+  // Pass 2: sackmann
+  for (const slug of await getStillNull()) {
+    const r = await db.execute({
+      sql: "SELECT opponent_rank FROM player_match_stats WHERE source='sackmann_csv' AND opponent_slug = ? AND opponent_rank IS NOT NULL ORDER BY match_date DESC LIMIT 1",
+      args: [slug],
+    });
+    const row = r.rows[0] as unknown as { opponent_rank: number } | undefined;
+    if (row) updatedPass2 += await updateRank(row.opponent_rank, slug);
+  }
+
+  // Pass 3: peer inference ≥3
+  for (const slug of await getStillNull()) {
+    const r = await db.execute({
+      sql: "SELECT opponent_rank FROM player_match_stats WHERE te_slug = ? AND opponent_rank IS NOT NULL ORDER BY match_date DESC LIMIT 30",
+      args: [slug],
+    });
+    const rows = r.rows as unknown as { opponent_rank: number }[];
+    if (rows.length < 3) continue;
+    const sorted = rows.map((row) => row.opponent_rank).sort((a, b) => a - b);
+    const estimatedRank = median(sorted);
+    if (estimatedRank > 0) updatedPass3 += await updateRank(estimatedRank, slug);
+  }
+
+  // Pass 4: ATP default 150
+  for (const slug of await getStillNull()) {
+    if (atpSlugSet.has(slug)) updatedPass4 += await updateRank(150, slug);
+  }
+
+  // Pass 5: peer inference ≥1
+  for (const slug of await getStillNull()) {
+    const r = await db.execute({
+      sql: "SELECT opponent_rank FROM player_match_stats WHERE te_slug = ? AND opponent_rank IS NOT NULL ORDER BY match_date DESC LIMIT 30",
+      args: [slug],
+    });
+    const rows = r.rows as unknown as { opponent_rank: number }[];
+    if (rows.length < 1) continue;
+    const sorted = rows.map((row) => row.opponent_rank).sort((a, b) => a - b);
+    const estimatedRank = median(sorted);
+    if (estimatedRank > 0) updatedPass5 += await updateRank(estimatedRank, slug);
+  }
+
+  // Pass 6: universal default 250
+  const pass6Result = await db.execute(
+    "UPDATE player_match_stats SET opponent_rank = 250 WHERE source='te_history' AND opponent_rank IS NULL AND opponent_slug IS NOT NULL"
   );
-
-  const pass2 = db.transaction(() => {
-    for (const slug of getStillNull()) {
-      const row = sackStmt.get(slug) as { opponent_rank: number } | undefined;
-      if (row) updatedPass2 += updateStmt.run(row.opponent_rank, slug).changes;
-    }
-  });
-  pass2();
-
-  // ── Pass 3: Peer inference ────────────────────────────────
-  // For each still-null opponent_slug that exists as te_slug in DB,
-  // estimate their rank = median of their OWN opponents' ranks.
-  // Rationale: ATP scheduling pairs similar-ranked players → avg opp_rank ≈ player rank.
-  const peerRankStmt = db.prepare(
-    `SELECT opponent_rank FROM player_match_stats
-     WHERE te_slug = ? AND opponent_rank IS NOT NULL
-     ORDER BY match_date DESC LIMIT 30`
-  );
-
-  const pass3 = db.transaction(() => {
-    for (const slug of getStillNull()) {
-      const rows = peerRankStmt.all(slug) as { opponent_rank: number }[];
-      if (rows.length < 3) continue; // not enough data for reliable estimate
-      const sorted = rows.map((r) => r.opponent_rank).sort((a, b) => a - b);
-      const estimatedRank = median(sorted);
-      if (estimatedRank > 0) {
-        updatedPass3 += updateStmt.run(estimatedRank, slug).changes;
-      }
-    }
-  });
-  pass3();
-
-  // ── Pass 4: ATP_SLUG_MAP confirmed players → default 150 ──
-  // Any slug present in ATP_SLUG_MAP is a confirmed ATP circuit player.
-  // If still unresolved after passes 1-3, assign rank 150 (conservative mid-range).
-  const atpSlugSet = new Set(Object.keys(ATP_SLUG_MAP));
-
-  const pass4 = db.transaction(() => {
-    for (const slug of getStillNull()) {
-      if (atpSlugSet.has(slug)) {
-        updatedPass4 += updateStmt.run(150, slug).changes;
-      }
-    }
-  });
-  pass4();
-
-  // ── Pass 5: Peer inference (low threshold, ≥1 match) ─────
-  // Re-run peer inference with threshold = 1 to catch slugs with minimal data.
-  let updatedPass5 = 0;
-  const pass5 = db.transaction(() => {
-    for (const slug of getStillNull()) {
-      const rows = peerRankStmt.all(slug) as { opponent_rank: number }[];
-      if (rows.length < 1) continue;
-      const sorted = rows.map((r) => r.opponent_rank).sort((a, b) => a - b);
-      const estimatedRank = median(sorted);
-      if (estimatedRank > 0) {
-        updatedPass5 += updateStmt.run(estimatedRank, slug).changes;
-      }
-    }
-  });
-  pass5();
-
-  // ── Pass 6: Universal default for any remaining null ──────
-  // These are qualifier/Challenger-level opponents not in any reference source.
-  // They reached the ATP main draw but are ranked ~200-400.
-  // Assign 250 as a conservative default to enable qualityWinRate computation.
-  let updatedPass6 = 0;
-  const pass6 = db.transaction(() => {
-    const info = db.prepare(
-      "UPDATE player_match_stats SET opponent_rank = 250 WHERE source='te_history' AND opponent_rank IS NULL AND opponent_slug IS NOT NULL"
-    ).run();
-    updatedPass6 = info.changes;
-  });
-  pass6();
+  updatedPass6 = pass6Result.rowsAffected;
 
   const totalUpdated = updatedPass1 + updatedPass2 + updatedPass3 + updatedPass4 + updatedPass5 + updatedPass6;
-  const finalNull = (db.prepare(
-    "SELECT COUNT(*) as n FROM player_match_stats WHERE source='te_history' AND opponent_rank IS NULL AND opponent_slug IS NOT NULL"
-  ).get() as { n: number }).n;
 
-  // ── Invalidate all cached patterns ────────────────────────
-  const patternsDeleted = db.prepare("DELETE FROM player_patterns").run().changes;
+  const finalNullResult = await db.execute(
+    "SELECT COUNT(*) as n FROM player_match_stats WHERE source='te_history' AND opponent_rank IS NULL AND opponent_slug IS NOT NULL"
+  );
+  const finalNull = (finalNullResult.rows[0] as unknown as { n: number }).n;
+
+  const patternsResult = await db.execute("DELETE FROM player_patterns");
+  const patternsDeleted = patternsResult.rowsAffected;
 
   return NextResponse.json({
     ok: true,
@@ -206,6 +164,6 @@ export async function POST() {
     stillNull: finalNull,
     coveragePct: `${((nullCount - finalNull) / nullCount * 100).toFixed(1)}%`,
     patternsInvalidated: patternsDeleted,
-    message: `Enriched ${totalUpdated}/${nullCount} rows (${((nullCount - finalNull) / nullCount * 100).toFixed(1)}% coverage). ${finalNull} remain unresolved. ${patternsDeleted} patterns invalidated.`,
+    message: `Enriched ${totalUpdated}/${nullCount} rows. ${finalNull} remain unresolved. ${patternsDeleted} patterns invalidated.`,
   });
 }

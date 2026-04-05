@@ -127,8 +127,10 @@ async function enrichMatch(row: {
   const pattern = inferMatchPattern(score);
 
   // ── Paso 2: nombres legibles ───────────────────────────
-  const winnerPlayer = getPlayer(row.winner_slug);
-  const loserPlayer  = row.loser_slug ? getPlayer(row.loser_slug) : undefined;
+  const [winnerPlayer, loserPlayer] = await Promise.all([
+    getPlayer(row.winner_slug),
+    row.loser_slug ? getPlayer(row.loser_slug) : Promise.resolve(undefined),
+  ]);
   const winnerName = winnerPlayer?.full_name ?? row.winner_slug;
   const loserName  = loserPlayer?.full_name  ?? (row.loser_slug ?? "Oponente");
 
@@ -164,7 +166,7 @@ async function enrichMatch(row: {
   }
 
   // ── Paso 5: guardar en match_insights ─────────────────
-  upsertMatchInsight({
+  await upsertMatchInsight({
     te_match_id:   matchId,
     match_date:    row.match_date,
     winner_slug:   row.winner_slug,
@@ -182,20 +184,20 @@ async function enrichMatch(row: {
   // ── Paso 6: acumular en player_insights ───────────────
   if (insights) {
     // Ganador
-    const winnerAcc = getPlayerInsights(row.winner_slug);
-    savePlayerInsights(row.winner_slug, addToAccumulated(winnerAcc, insights, pattern, surface, true));
+    const winnerAcc = await getPlayerInsights(row.winner_slug);
+    await savePlayerInsights(row.winner_slug, addToAccumulated(winnerAcc, insights, pattern, surface, true));
 
     // Perdedor
     if (row.loser_slug) {
-      const loserAcc = getPlayerInsights(row.loser_slug);
-      savePlayerInsights(row.loser_slug, addToAccumulated(loserAcc, insights, pattern, surface, false));
+      const loserAcc = await getPlayerInsights(row.loser_slug);
+      await savePlayerInsights(row.loser_slug, addToAccumulated(loserAcc, insights, pattern, surface, false));
     }
   }
 
   // ── Paso 7: aprendizaje post-partido ──────────────────
   if (row.loser_slug) {
     try {
-      processPostMatchLearning(
+      await processPostMatchLearning(
         matchId, row.match_date,
         row.winner_slug, row.loser_slug,
         pattern,
@@ -231,9 +233,9 @@ export async function enrichRecentMatches(
   since: string,
   limit = 30,
 ): Promise<EnrichmentSummary> {
-  runMigrations();
+  await runMigrations();
 
-  const pending = getMatchesNeedingEnrichment(since, limit);
+  const pending = await getMatchesNeedingEnrichment(since, limit);
 
   const summary: EnrichmentSummary = {
     processed: 0,

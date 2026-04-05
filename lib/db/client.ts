@@ -1,25 +1,14 @@
-import Database from "better-sqlite3";
-import path from "path";
-import fs from "fs";
+import { createClient, type Client } from "@libsql/client";
 
-const DB_PATH = path.join(process.cwd(), "data", "tennis.db");
+let _client: Client | null = null;
 
-// Ensure data/ directory exists
-const dataDir = path.dirname(DB_PATH);
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-
-// Singleton via globalThis to survive Next.js hot-reload
-declare global {
-  // eslint-disable-next-line no-var
-  var __db: Database.Database | undefined;
-}
-
-export function getDb(): Database.Database {
-  if (!globalThis.__db) {
-    globalThis.__db = new Database(DB_PATH);
-    globalThis.__db.pragma("journal_mode = WAL");
-    globalThis.__db.pragma("foreign_keys = ON");
-    globalThis.__db.pragma("synchronous = NORMAL");
-  }
-  return globalThis.__db;
+export function getDb(): Client {
+  if (_client) return _client;
+  const url = process.env.TURSO_DATABASE_URL;
+  if (!url) throw new Error("TURSO_DATABASE_URL env var is not set");
+  _client = createClient({
+    url,
+    authToken: process.env.TURSO_AUTH_TOKEN,
+  });
+  return _client;
 }

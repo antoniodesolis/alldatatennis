@@ -18,14 +18,11 @@ import { runMigrations } from "../../../../lib/db/schema";
 import { enrichRecentMatches } from "../../../../lib/ingest/match-enricher";
 import { getDb } from "../../../../lib/db/client";
 
-runMigrations();
-
 export async function POST(req: Request) {
   try {
     const url = new URL(req.url);
     const limit = Math.min(parseInt(url.searchParams.get("limit") ?? "30"), 100);
 
-    // Default: últimos 14 días para tener suficiente historial
     const defaultSince = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
       .toISOString().slice(0, 10);
     const since = url.searchParams.get("since") ?? defaultSince;
@@ -47,35 +44,36 @@ export async function POST(req: Request) {
 }
 
 export async function GET() {
-  runMigrations();
+  await runMigrations();
   const db = getDb();
 
-  const totalInsights = (db.prepare(
-    "SELECT COUNT(*) as n FROM match_insights"
-  ).get() as { n: number }).n;
+  const totalResult = await db.execute("SELECT COUNT(*) as n FROM match_insights");
+  const totalInsights = (totalResult.rows[0] as unknown as { n: number }).n;
 
-  const withChronicle = (db.prepare(
+  const chronicleResult = await db.execute(
     "SELECT COUNT(*) as n FROM match_insights WHERE chronicle_url IS NOT NULL"
-  ).get() as { n: number }).n;
+  );
+  const withChronicle = (chronicleResult.rows[0] as unknown as { n: number }).n;
 
-  const patternCounts = db.prepare(`
+  const patternResult = await db.execute(`
     SELECT match_pattern, COUNT(*) as n
     FROM match_insights
     WHERE match_pattern IS NOT NULL
     GROUP BY match_pattern
-  `).all() as Array<{ match_pattern: string; n: number }>;
+  `);
+  const patternCounts = patternResult.rows as unknown as Array<{ match_pattern: string; n: number }>;
 
-  const playerInsightCount = (db.prepare(
-    "SELECT COUNT(*) as n FROM player_insights"
-  ).get() as { n: number }).n;
+  const playerInsightResult = await db.execute("SELECT COUNT(*) as n FROM player_insights");
+  const playerInsightCount = (playerInsightResult.rows[0] as unknown as { n: number }).n;
 
-  const recentEnriched = db.prepare(`
+  const recentResult = await db.execute(`
     SELECT te_match_id, match_date, winner_slug, loser_slug, match_pattern,
            chronicle_src, insights_json IS NOT NULL as has_insights
     FROM match_insights
     ORDER BY enriched_at DESC
     LIMIT 10
-  `).all();
+  `);
+  const recentEnriched = recentResult.rows;
 
   const hasClaudeKey = !!process.env.ANTHROPIC_API_KEY;
 

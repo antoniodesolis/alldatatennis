@@ -3,12 +3,6 @@
  *
  * Fuerza una actualización del ranking ATP top 100 desde atptour.com
  * y persiste el resultado en la base de datos.
- *
- * Uso cada lunes después de los torneos:
- *   curl -X POST http://localhost:3000/api/admin/update-rankings
- *
- * También acepta un JSON manual si el scraping falla:
- *   POST con body { players: [ { rank, name, atpCode, country, points } ... ] }
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -19,16 +13,14 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({})) as { players?: ATPPlayer[] };
 
-    // Si se envía un JSON con jugadores manuales, usarlos directamente
     if (body.players && Array.isArray(body.players) && body.players.length >= 20) {
       const players = body.players as ATPPlayer[];
-      // Asegurar que tienen photo URL
       const normalized = players.map((p) => ({
         ...p,
         photo: p.photo || `https://www.atptour.com/-/media/alias/player-headshot/${p.atpCode}`,
         points: p.points ?? "",
       }));
-      saveRankingsToDB(normalized);
+      await saveRankingsToDB(normalized);
       return NextResponse.json({
         ok: true,
         source: "manual",
@@ -38,13 +30,12 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Intentar scraping en vivo
     const players = await scrapeRankings();
     if (!players || players.length < 20) {
       return NextResponse.json({ ok: false, error: "Scraping devolvió menos de 20 jugadores" }, { status: 502 });
     }
 
-    saveRankingsToDB(players);
+    await saveRankingsToDB(players);
 
     return NextResponse.json({
       ok: true,
@@ -59,8 +50,7 @@ export async function POST(req: NextRequest) {
     const msg = (err as Error).message;
     console.error("[update-rankings] ERROR:", msg);
 
-    // Si el scraping falló, devolver el estado actual de la DB
-    const current = loadRankingsFromDB();
+    const current = await loadRankingsFromDB();
     return NextResponse.json({
       ok: false,
       error: msg,
@@ -72,7 +62,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET() {
-  const current = loadRankingsFromDB();
+  const current = await loadRankingsFromDB();
   if (!current) {
     return NextResponse.json({ status: "Sin rankings en DB — usando datos estáticos", updatedAt: null });
   }

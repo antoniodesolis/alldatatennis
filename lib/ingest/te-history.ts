@@ -15,8 +15,7 @@
  * source = "te_history"  → en COALESCE tiene más prioridad que "te_scrape" (datos del día)
  */
 
-import { getDb } from "../db/client";
-import { upsertPlayer } from "../db/queries";
+import { upsertPlayer, upsertMatchStat } from "../db/queries";
 import { normalizeSurface, normalizeRound, ATP_SLUG_MAP } from "../analytics/player-resolver";
 import { getPlayerStyle } from "../analytics/player-styles";
 import { getTourneyLevel, isIndoor, type TourneyLevel } from "./tourney-meta";
@@ -246,83 +245,43 @@ function isATPMainTour(tournament: string): boolean {
 
 // ── DB insert ─────────────────────────────────────────────
 
-let _insertStmt: ReturnType<ReturnType<typeof getDb>["prepare"]> | null = null;
-
-function getInsertStmt() {
-  if (_insertStmt) return _insertStmt;
-  const db = getDb();
-  _insertStmt = db.prepare(`
-    INSERT INTO player_match_stats
-      (te_slug, te_match_id, match_date, tournament, surface, round,
-       opponent_slug, result, score, duration_min,
-       aces, double_faults, serve_pts, first_in, first_won, second_won,
-       serve_games, bp_saved, bp_faced, return_pts_won,
-       winners, unforced_errors, match_time, time_of_day, opponent_style,
-       best_of, tourney_level, indoor, opponent_rank,
-       sets_played, won_deciding, tb_played, tb_won, bp_converted, bp_opportunities,
-       court_speed, source)
-    VALUES
-      (@te_slug, @te_match_id, @match_date, @tournament, @surface, @round,
-       @opponent_slug, @result, @score, @duration_min,
-       NULL, NULL, NULL, NULL, NULL, NULL,
-       NULL, NULL, NULL, NULL,
-       NULL, NULL, @match_time, NULL, @opponent_style,
-       @best_of, @tourney_level, @indoor, NULL,
-       @sets_played, @won_deciding, @tb_played, @tb_won, NULL, NULL,
-       NULL, @source)
-    ON CONFLICT(te_slug, te_match_id) DO UPDATE SET
-      tournament    = COALESCE(excluded.tournament,    tournament),
-      surface       = COALESCE(excluded.surface,       surface),
-      round         = COALESCE(excluded.round,         round),
-      score         = COALESCE(excluded.score,         score),
-      result        = COALESCE(excluded.result,        result),
-      match_time    = COALESCE(excluded.match_time,    match_time),
-      tourney_level = COALESCE(excluded.tourney_level, tourney_level),
-      indoor        = COALESCE(excluded.indoor,        indoor),
-      opponent_slug = COALESCE(excluded.opponent_slug, opponent_slug),
-      opponent_style= COALESCE(excluded.opponent_style,opponent_style),
-      sets_played   = COALESCE(excluded.sets_played,   sets_played),
-      won_deciding  = COALESCE(excluded.won_deciding,  won_deciding),
-      tb_played     = COALESCE(excluded.tb_played,     tb_played),
-      tb_won        = COALESCE(excluded.tb_won,        tb_won),
-      source        = CASE WHEN excluded.source = 'te_history' THEN excluded.source ELSE source END
-  `);
-  return _insertStmt;
-}
-
-function insertMatches(matches: TEMatch[]): { inserted: number; dupes: number } {
+async function insertMatches(matches: TEMatch[]): Promise<{ inserted: number; dupes: number }> {
   if (matches.length === 0) return { inserted: 0, dupes: 0 };
-  const db  = getDb();
-  const stmt = getInsertStmt();
   let inserted = 0, dupes = 0;
 
-  const run = db.transaction(() => {
-    for (const m of matches) {
-      const level  = inferTELevel(m.tournament);
-      const indoor = isIndoor(m.tournament, m.surface) ? 1 : 0;
+  for (const m of matches) {
+    const level  = inferTELevel(m.tournament);
+    const indoor = isIndoor(m.tournament, m.surface) ? 1 : 0;
 
-      upsertPlayer({ te_slug: m.winnerSlug, atp_code: null, full_name: m.winnerName, sackmann_id: null });
-      upsertPlayer({ te_slug: m.loserSlug,  atp_code: null, full_name: m.loserName,  sackmann_id: null });
+    await upsertPlayer({ te_slug: m.winnerSlug, atp_code: null, full_name: m.winnerName, sackmann_id: null });
+    await upsertPlayer({ te_slug: m.loserSlug,  atp_code: null, full_name: m.loserName,  sackmann_id: null });
 
-      const wStats = m.score ? playerScoreStats(m.score, "W", 3) : null;
-      const lStats = m.score ? playerScoreStats(m.score, "L", 3) : null;
+    const wStats = m.score ? playerScoreStats(m.score, "W", 3) : null;
+    const lStats = m.score ? playerScoreStats(m.score, "L", 3) : null;
 
-      const base = {
-        te_match_id:  m.teMatchId,
-        match_date:   m.date,
-        tournament:   m.tournament,
-        surface:      m.surface,
-        round:        m.round,
-        score:        m.score,
-        duration_min: null,
-        match_time:   m.matchTime,
-        tourney_level: level,
-        indoor,
-        best_of: 3,
-        source: "te_history",
-      };
+    const base = {
+      te_match_id:  m.teMatchId,
+      match_date:   m.date,
+      tournament:   m.tournament,
+      surface:      m.surface,
+      round:        m.round,
+      score:        m.score,
+      duration_min: null,
+      match_time:   m.matchTime,
+      time_of_day:  null,
+      tourney_level: level,
+      indoor,
+      best_of: 3,
+      source: "te_history",
+      aces: null, double_faults: null, serve_pts: null,
+      first_in: null, first_won: null, second_won: null,
+      serve_games: null, bp_saved: null, bp_faced: null,
+      return_pts_won: null, winners: null, unforced_errors: null,
+      opponent_rank: null, bp_converted: null, bp_opportunities: null, court_speed: null,
+    };
 
-      const rW = stmt.run({
+    try {
+      await upsertMatchStat({
         ...base,
         te_slug:       m.winnerSlug,
         opponent_slug: m.loserSlug,
@@ -333,8 +292,7 @@ function insertMatches(matches: TEMatch[]): { inserted: number; dupes: number } 
         tb_played:     wStats?.tbPlayed     ?? null,
         tb_won:        wStats?.tbWon        ?? null,
       });
-
-      const rL = stmt.run({
+      await upsertMatchStat({
         ...base,
         te_slug:       m.loserSlug,
         opponent_slug: m.winnerSlug,
@@ -345,12 +303,12 @@ function insertMatches(matches: TEMatch[]): { inserted: number; dupes: number } 
         tb_played:     lStats?.tbPlayed     ?? null,
         tb_won:        lStats?.tbWon        ?? null,
       });
-
-      if ((rW.changes ?? 0) + (rL.changes ?? 0) > 0) inserted++; else dupes++;
+      inserted++;
+    } catch {
+      dupes++;
     }
-  });
+  }
 
-  run();
   return { inserted, dupes };
 }
 
@@ -441,7 +399,7 @@ export async function scrapeTeDay(year: number, month: number, day: number): Pro
   const parsed = parseDayPage(html, date);
   if (parsed.length === 0) return { date, matches: 0, inserted: 0, dupes: 0 };
 
-  const { inserted, dupes } = insertMatches(parsed);
+  const { inserted, dupes } = await insertMatches(parsed);
   return { date, matches: parsed.length, inserted, dupes };
 }
 

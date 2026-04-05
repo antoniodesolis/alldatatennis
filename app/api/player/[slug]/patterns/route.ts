@@ -1,8 +1,5 @@
-import { runMigrations } from "../../../../../lib/db/schema";
 import { getPlayerPatterns } from "../../../../../lib/analytics/patterns";
 import { canonicalSlug } from "../../../../../lib/analytics/player-resolver";
-
-runMigrations();
 
 export async function GET(
   req: Request,
@@ -16,7 +13,6 @@ export async function GET(
 
   const slug    = canonicalSlug(rawSlug);
   const url     = new URL(req.url);
-  const surface = url.searchParams.get("surface") ?? "";
   const windowN = parseInt(url.searchParams.get("window") ?? "30");
 
   const [all, clay, hard, grass] = await Promise.all([

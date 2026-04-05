@@ -1,29 +1,5 @@
 /**
  * Court Speed Index (CSI) — modelo de velocidad de pista por torneo ATP.
- *
- * Usa los últimos 3 años de datos de Sackmann CSV para caracterizar cada pista
- * con métricas derivadas de los puntos de saque reales:
- *
- *   ace_rate         → porcentaje de puntos de saque que son aces
- *   first_won_pct    → % de puntos ganados con primer servicio
- *   second_won_pct   → % de puntos ganados con segundo servicio
- *   hold_pct         → probabilidad de mantener el servicio (1 – BP_conversion)
- *   tiebreak_rate    → tiebreaks por set
- *   avg_duration     → duración media del partido
- *
- * El CSI (0-100) se calcula globalmente para todos los torneos, luego se le
- * asigna un perfil de texto y una afinidad por estilo de juego.
- *
- * Ejemplos esperados (aproximados, verificados con los datos reales):
- *   Basel indoor    ~90/100 — pista muy rápida
- *   Wimbledon grass ~80/100 — rápida
- *   Paris indoor    ~72/100 — media-rápida
- *   US Open hard    ~55/100 — media
- *   Australian Open ~58/100 — media
- *   Madrid clay     ~45/100 — media-lenta (la altitud la acelera vs otras arcillas)
- *   Monte Carlo clay~20/100 — lenta
- *   Roland Garros   ~18/100 — lenta
- *   Barcelona clay  ~10/100 — muy lenta
  */
 
 import { getDb } from "../db/client";
@@ -32,7 +8,7 @@ import type { TournamentModelRow } from "../db/queries";
 import { getPlayerStyle } from "./player-styles";
 
 const YEARS = [2022, 2023, 2024];
-const MIN_MATCHES = 8; // mínimo de filas con datos de saque para incluir un torneo
+const MIN_MATCHES = 8;
 
 // ── Interfaces ────────────────────────────────────────────
 
@@ -41,7 +17,6 @@ export interface CourtModel {
   surface: string;
   matches: number;
   years: number[];
-  // Métricas brutas
   ace_rate: number;
   first_in_pct: number;
   first_won_pct: number;
@@ -49,19 +24,17 @@ export interface CourtModel {
   hold_pct: number;
   tiebreak_rate: number;
   avg_duration: number | null;
-  // Índice derivado
-  court_speed: number;       // 0-100
+  court_speed: number;
   court_profile: CourtProfile;
-  // Afinidad por estilo
   style_affinity: StyleAffinity;
 }
 
 export type CourtProfile =
-  | "fast"         // >70
-  | "medium-fast"  // 55-70
-  | "medium"       // 40-55
-  | "medium-slow"  // 25-40
-  | "slow";        // <25
+  | "fast"
+  | "medium-fast"
+  | "medium"
+  | "medium-slow"
+  | "slow";
 
 export interface StyleAffinity {
   "big-server": number;
@@ -86,33 +59,37 @@ interface RawRow {
   avg_duration: number | null;
 }
 
-function fetchRawMetrics(): RawRow[] {
+async function fetchRawMetrics(): Promise<RawRow[]> {
   const db = getDb();
   const yearStart = `${Math.min(...YEARS)}-01-01`;
   const yearEnd   = `${Math.max(...YEARS)}-12-31`;
 
-  return db.prepare(`
-    SELECT
-      tournament                          AS tourney_name,
-      surface,
-      COUNT(*)                            AS rows,
-      SUM(aces) * 1.0 / NULLIF(SUM(serve_pts), 0)                            AS ace_rate,
-      SUM(first_in) * 1.0 / NULLIF(SUM(serve_pts), 0)                        AS first_in_pct,
-      SUM(first_won) * 1.0 / NULLIF(SUM(first_in), 0)                        AS first_won_pct,
-      SUM(second_won) * 1.0 / NULLIF(SUM(serve_pts) - SUM(first_in), 0)      AS second_won_pct,
-      SUM(bp_converted) * 1.0 / NULLIF(SUM(bp_opportunities), 0)             AS bp_conv,
-      SUM(tb_played) * 1.0 / NULLIF(SUM(sets_played), 0)                     AS tiebreak_rate,
-      AVG(CASE WHEN duration_min > 0 THEN duration_min END)                   AS avg_duration
-    FROM player_match_stats
-    WHERE
-      match_date BETWEEN ? AND ?
-      AND tournament IS NOT NULL
-      AND first_in IS NOT NULL
-      AND serve_pts IS NOT NULL
-    GROUP BY tournament, surface
-    HAVING rows >= ?
-    ORDER BY rows DESC
-  `).all(yearStart, yearEnd, MIN_MATCHES) as RawRow[];
+  const result = await db.execute({
+    sql: `
+      SELECT
+        tournament                          AS tourney_name,
+        surface,
+        COUNT(*)                            AS rows,
+        SUM(aces) * 1.0 / NULLIF(SUM(serve_pts), 0)                            AS ace_rate,
+        SUM(first_in) * 1.0 / NULLIF(SUM(serve_pts), 0)                        AS first_in_pct,
+        SUM(first_won) * 1.0 / NULLIF(SUM(first_in), 0)                        AS first_won_pct,
+        SUM(second_won) * 1.0 / NULLIF(SUM(serve_pts) - SUM(first_in), 0)      AS second_won_pct,
+        SUM(bp_converted) * 1.0 / NULLIF(SUM(bp_opportunities), 0)             AS bp_conv,
+        SUM(tb_played) * 1.0 / NULLIF(SUM(sets_played), 0)                     AS tiebreak_rate,
+        AVG(CASE WHEN duration_min > 0 THEN duration_min END)                   AS avg_duration
+      FROM player_match_stats
+      WHERE
+        match_date BETWEEN ? AND ?
+        AND tournament IS NOT NULL
+        AND first_in IS NOT NULL
+        AND serve_pts IS NOT NULL
+      GROUP BY tournament, surface
+      HAVING rows >= ?
+      ORDER BY rows DESC
+    `,
+    args: [yearStart, yearEnd, MIN_MATCHES],
+  });
+  return result.rows as unknown as RawRow[];
 }
 
 // ── Normalización ─────────────────────────────────────────
@@ -123,15 +100,10 @@ function normalize(val: number, min: number, max: number): number {
 }
 
 function courtSpeedRaw(r: RawRow): number {
-  // Ponderación calibrada para separar bien las pistas:
-  //   primer servicio ganado: mayor peso (señal más clara)
-  //   segundo servicio ganado: aporta diferenciación
-  //   ace_rate: amplifica la diferencia en superficies extremas
-  //   1 - bp_conv: courts donde es difícil romper = más rápidas
   const bpHold = r.bp_conv !== null ? 1 - r.bp_conv : 0.5;
   return 0.40 * r.first_won_pct
        + 0.28 * r.second_won_pct
-       + 0.22 * (r.ace_rate * 5)   // ace_rate es ~0.05-0.12, ×5 → ~0.25-0.60
+       + 0.22 * (r.ace_rate * 5)
        + 0.10 * bpHold;
 }
 
@@ -145,26 +117,33 @@ function speedToProfile(speed: number): CourtProfile {
 
 // ── Afinidad por estilo ───────────────────────────────────
 
-function computeStyleAffinity(tourneyName: string): StyleAffinity {
+async function computeStyleAffinity(tourneyName: string): Promise<StyleAffinity> {
   const db = getDb();
   const yearStart = `${Math.min(...YEARS)}-01-01`;
   const yearEnd   = `${Math.max(...YEARS)}-12-31`;
 
-  const rows = db.prepare(`
-    SELECT te_slug, result
-    FROM player_match_stats
-    WHERE tournament = ?
-      AND match_date BETWEEN ? AND ?
-      AND result IS NOT NULL
-  `).all(tourneyName, yearStart, yearEnd) as { te_slug: string; result: string }[];
+  const courtResult = await db.execute({
+    sql: `
+      SELECT te_slug, result
+      FROM player_match_stats
+      WHERE tournament = ?
+        AND match_date BETWEEN ? AND ?
+        AND result IS NOT NULL
+    `,
+    args: [tourneyName, yearStart, yearEnd],
+  });
+  const rows = courtResult.rows as unknown as { te_slug: string; result: string }[];
 
-  // Compute global win rate per style (all tournaments)
-  const globalRows = db.prepare(`
-    SELECT te_slug, result
-    FROM player_match_stats
-    WHERE match_date BETWEEN ? AND ?
-      AND result IS NOT NULL
-  `).all(yearStart, yearEnd) as { te_slug: string; result: string }[];
+  const globalResult = await db.execute({
+    sql: `
+      SELECT te_slug, result
+      FROM player_match_stats
+      WHERE match_date BETWEEN ? AND ?
+        AND result IS NOT NULL
+    `,
+    args: [yearStart, yearEnd],
+  });
+  const globalRows = globalResult.rows as unknown as { te_slug: string; result: string }[];
 
   const styles = ["big-server", "aggressive-baseliner", "all-court", "counter-puncher", "baseliner"] as const;
 
@@ -179,7 +158,7 @@ function computeStyleAffinity(tourneyName: string): StyleAffinity {
     const cWR = courtStats[style];
     const gWR = globalStats[style];
     if (cWR !== null && gWR !== null) {
-      affinity[style] = Math.round((cWR - gWR) * 1000) / 10; // en puntos porcentuales ×10
+      affinity[style] = Math.round((cWR - gWR) * 1000) / 10;
     }
   }
   return affinity;
@@ -204,18 +183,10 @@ function computeStyleStats(
 
 // ── Punto de entrada público ──────────────────────────────
 
-/**
- * Computa y guarda los modelos de pista para todos los torneos
- * con suficientes datos en los últimos 3 años.
- * Además actualiza court_speed en player_match_stats para cada torneo.
- *
- * Devuelve el número de torneos procesados.
- */
-export function computeAndSaveTournamentModels(): { computed: number; models: CourtModel[] } {
-  const rawRows = fetchRawMetrics();
+export async function computeAndSaveTournamentModels(): Promise<{ computed: number; models: CourtModel[] }> {
+  const rawRows = await fetchRawMetrics();
   if (rawRows.length === 0) return { computed: 0, models: [] };
 
-  // Calcular raw speed para todos los torneos
   const rawSpeeds = rawRows.map((r) => courtSpeedRaw(r));
   const minSpeed = Math.min(...rawSpeeds);
   const maxSpeed = Math.max(...rawSpeeds);
@@ -227,7 +198,7 @@ export function computeAndSaveTournamentModels(): { computed: number; models: Co
     const raw = rawSpeeds[i];
     const courtSpeed = Math.round(normalize(raw, minSpeed, maxSpeed) * 100);
     const profile = speedToProfile(courtSpeed);
-    const affinity = computeStyleAffinity(r.tourney_name);
+    const affinity = await computeStyleAffinity(r.tourney_name);
 
     const model: CourtModel = {
       tourney_name: r.tourney_name,
@@ -248,7 +219,6 @@ export function computeAndSaveTournamentModels(): { computed: number; models: Co
 
     models.push(model);
 
-    // Guardar en DB
     const dbRow: TournamentModelRow = {
       tourney_name:  model.tourney_name,
       surface:       model.surface,
@@ -266,35 +236,28 @@ export function computeAndSaveTournamentModels(): { computed: number; models: Co
       style_affinity:JSON.stringify(model.style_affinity),
       computed_at:   Math.floor(Date.now() / 1000),
     };
-    upsertTournamentModel(dbRow);
-
-    // Propagar court_speed a player_match_stats
-    updateMatchCourtSpeed(model.tourney_name, model.court_speed);
+    await upsertTournamentModel(dbRow);
+    await updateMatchCourtSpeed(model.tourney_name, model.court_speed);
   }
 
   return { computed: models.length, models };
 }
 
-/**
- * Devuelve el modelo de pista para un torneo (desde DB).
- */
-export function getTournamentCourtModel(tourneyName: string): CourtModel | null {
+export async function getTournamentCourtModel(tourneyName: string): Promise<CourtModel | null> {
   const db = getDb();
-  const row = db.prepare(
-    "SELECT * FROM tournament_models WHERE tourney_name = ?"
-  ).get(tourneyName) as TournamentModelRow | undefined;
+  const result = await db.execute({
+    sql: "SELECT * FROM tournament_models WHERE tourney_name = ?",
+    args: [tourneyName],
+  });
+  const row = result.rows[0] as unknown as TournamentModelRow | undefined;
   if (!row || row.court_speed == null) return null;
   return deserializeModel(row);
 }
 
-/**
- * Devuelve todos los modelos ordenados por velocidad de pista descendente.
- */
-export function getAllCourtModels(): CourtModel[] {
+export async function getAllCourtModels(): Promise<CourtModel[]> {
   const db = getDb();
-  const rows = db.prepare(
-    "SELECT * FROM tournament_models ORDER BY court_speed DESC"
-  ).all() as TournamentModelRow[];
+  const result = await db.execute("SELECT * FROM tournament_models ORDER BY court_speed DESC");
+  const rows = result.rows as unknown as TournamentModelRow[];
   return rows.map(deserializeModel);
 }
 

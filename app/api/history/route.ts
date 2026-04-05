@@ -79,36 +79,37 @@ function isMainATP(tournament: string): boolean {
 export async function GET() {
   const db = getDb();
 
-  // Solo desde abril 2026 en adelante
   const FROM_DATE = "2026-04-01";
 
-  // Unique predictions: keep most recent per match+player1 combo
-  // Join with player_match_stats to resolve winner if not already stored
-  const rows = db.prepare(`
-    SELECT
-      pl.match_id,
-      pl.match_date,
-      pl.player1_slug,
-      pl.player2_slug,
-      pl.tournament,
-      pl.surface,
-      pl.predicted_p1_pct,
-      pl.actual_winner,
-      p1.full_name  AS p1_name,
-      p2.full_name  AS p2_name,
-      pms.te_slug   AS resolved_winner_slug
-    FROM prediction_log pl
-    LEFT JOIN players p1 ON p1.te_slug = pl.player1_slug
-    LEFT JOIN players p2 ON p2.te_slug = pl.player2_slug
-    LEFT JOIN player_match_stats pms ON
-      pms.match_date    = pl.match_date
-      AND pms.source    = 'te_history'
-      AND pms.result    = 'W'
-      AND (pms.te_slug = pl.player1_slug OR pms.te_slug = pl.player2_slug)
-      AND (pms.opponent_slug = pl.player1_slug OR pms.opponent_slug = pl.player2_slug)
-    WHERE pl.match_date >= ?
-    ORDER BY pl.match_date DESC, pl.id DESC
-  `).all(FROM_DATE) as Array<{
+  const queryResult = await db.execute({
+    sql: `
+      SELECT
+        pl.match_id,
+        pl.match_date,
+        pl.player1_slug,
+        pl.player2_slug,
+        pl.tournament,
+        pl.surface,
+        pl.predicted_p1_pct,
+        pl.actual_winner,
+        p1.full_name  AS p1_name,
+        p2.full_name  AS p2_name,
+        pms.te_slug   AS resolved_winner_slug
+      FROM prediction_log pl
+      LEFT JOIN players p1 ON p1.te_slug = pl.player1_slug
+      LEFT JOIN players p2 ON p2.te_slug = pl.player2_slug
+      LEFT JOIN player_match_stats pms ON
+        pms.match_date    = pl.match_date
+        AND pms.source    = 'te_history'
+        AND pms.result    = 'W'
+        AND (pms.te_slug = pl.player1_slug OR pms.te_slug = pl.player2_slug)
+        AND (pms.opponent_slug = pl.player1_slug OR pms.opponent_slug = pl.player2_slug)
+      WHERE pl.match_date >= ?
+      ORDER BY pl.match_date DESC, pl.id DESC
+    `,
+    args: [FROM_DATE],
+  });
+  const rows = queryResult.rows as unknown as Array<{
     match_id: string;
     match_date: string;
     player1_slug: string;

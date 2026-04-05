@@ -472,7 +472,7 @@ export async function getPlayerPatterns(
   // Normalize to canonical slug before any DB access
   teSlug = canonicalSlug(teSlug);
 
-  const cached = getPattern(teSlug, surface, windowN);
+  const cached = await getPattern(teSlug, surface, windowN);
   if (cached && cached.computed_at && Date.now() / 1000 - cached.computed_at < PATTERN_TTL_MS / 1000) {
     return deserializePattern(cached);
   }
@@ -480,19 +480,19 @@ export async function getPlayerPatterns(
   // Primero intenta solo últimos 24 meses — sin límite para asegurar que
   // resultRows (sackmann) y shotRows (charting) tengan suficientes filas cada uno.
   const since24m = monthsAgo(24);
-  let rows = getPlayerMatches(teSlug, { surface: surface || undefined, since: since24m });
+  let rows = await getPlayerMatches(teSlug, { surface: surface || undefined, since: since24m });
 
   // Si hay pocos partidos con resultado real, amplía a todo el histórico
   const recentWithResult = rows.filter((r) => r.result !== null).length;
   if (recentWithResult < MIN_RECENT_MATCHES) {
-    rows = getPlayerMatches(teSlug, { surface: surface || undefined });
+    rows = await getPlayerMatches(teSlug, { surface: surface || undefined });
   }
 
   if (rows.length === 0) return null;
 
   const result = computeFromRows(rows, teSlug, surface, windowN);
 
-  savePattern({
+  await savePattern({
     te_slug: teSlug,
     surface,
     window_n: windowN,
@@ -575,6 +575,6 @@ function deserializePattern(row: PatternRow): PlayerPatterns {
   };
 }
 
-export function resetPatterns(teSlug: string) {
-  invalidatePatterns(canonicalSlug(teSlug));
+export async function resetPatterns(teSlug: string): Promise<void> {
+  await invalidatePatterns(canonicalSlug(teSlug));
 }

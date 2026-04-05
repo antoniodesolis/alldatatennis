@@ -195,14 +195,18 @@ function makeFactorResult(
 
 // ── H2H ──────────────────────────────────────────────────
 
-function getH2H(p1: string, p2: string) {
+async function getH2H(p1: string, p2: string) {
   const db = getDb();
-  const rows = db.prepare(`
-    SELECT result, match_date, tournament, surface
-    FROM player_match_stats
-    WHERE te_slug = ? AND opponent_slug = ? AND result IS NOT NULL
-    ORDER BY match_date DESC LIMIT 20
-  `).all(p1, p2) as { result: string; match_date: string; tournament: string; surface: string }[];
+  const result = await db.execute({
+    sql: `
+      SELECT result, match_date, tournament, surface
+      FROM player_match_stats
+      WHERE te_slug = ? AND opponent_slug = ? AND result IS NOT NULL
+      ORDER BY match_date DESC LIMIT 20
+    `,
+    args: [p1, p2],
+  });
+  const rows = result.rows as unknown as { result: string; match_date: string; tournament: string; surface: string }[];
 
   const p1Wins = rows.filter((r) => r.result === "W").length;
   const p2Wins = rows.filter((r) => r.result === "L").length;
@@ -211,17 +215,20 @@ function getH2H(p1: string, p2: string) {
   return { p1Wins, p2Wins, total: p1Wins + p2Wins, lastMatches, rows };
 }
 
-function getH2HSurface(p1: string, p2: string, surface: string): { p1Wins: number; p2Wins: number; total: number } {
+async function getH2HSurface(p1: string, p2: string, surface: string): Promise<{ p1Wins: number; p2Wins: number; total: number }> {
   const db = getDb();
-  // Normalizar superficie para el match (clay/hard/grass)
   const surfNorm = surface.includes("clay") ? "clay" : surface.includes("grass") ? "grass" : "hard";
-  const rows = db.prepare(`
-    SELECT result FROM player_match_stats
-    WHERE te_slug = ? AND opponent_slug = ?
-      AND result IS NOT NULL
-      AND (surface LIKE ? OR surface = ?)
-    ORDER BY match_date DESC LIMIT 12
-  `).all(p1, p2, `%${surfNorm}%`, surface) as { result: string }[];
+  const result = await db.execute({
+    sql: `
+      SELECT result FROM player_match_stats
+      WHERE te_slug = ? AND opponent_slug = ?
+        AND result IS NOT NULL
+        AND (surface LIKE ? OR surface = ?)
+      ORDER BY match_date DESC LIMIT 12
+    `,
+    args: [p1, p2, `%${surfNorm}%`, surface],
+  });
+  const rows = result.rows as unknown as { result: string }[];
 
   const p1Wins = rows.filter((r) => r.result === "W").length;
   const p2Wins = rows.filter((r) => r.result === "L").length;
@@ -230,7 +237,7 @@ function getH2HSurface(p1: string, p2: string, surface: string): { p1Wins: numbe
 
 // ── Recent form (últimos 3 meses) ─────────────────────────
 
-function getRecentForm3m(slug: string, refDate: string): { winRate: number | null; matches: number } {
+async function getRecentForm3m(slug: string, refDate: string): Promise<{ winRate: number | null; matches: number }> {
   const db = getDb();
   const since = (() => {
     const d = new Date(refDate);
@@ -238,11 +245,15 @@ function getRecentForm3m(slug: string, refDate: string): { winRate: number | nul
     return d.toISOString().slice(0, 10);
   })();
 
-  const rows = db.prepare(`
-    SELECT result FROM player_match_stats
-    WHERE te_slug = ? AND match_date >= ? AND result IS NOT NULL
-    ORDER BY match_date DESC LIMIT 40
-  `).all(slug, since) as { result: string }[];
+  const result = await db.execute({
+    sql: `
+      SELECT result FROM player_match_stats
+      WHERE te_slug = ? AND match_date >= ? AND result IS NOT NULL
+      ORDER BY match_date DESC LIMIT 40
+    `,
+    args: [slug, since],
+  });
+  const rows = result.rows as unknown as { result: string }[];
 
   if (rows.length === 0) return { winRate: null, matches: 0 };
   const wins = rows.filter((r) => r.result === "W").length;
@@ -251,16 +262,18 @@ function getRecentForm3m(slug: string, refDate: string): { winRate: number | nul
 
 // ── Rival rank estimation ─────────────────────────────────
 
-function estimatePlayerRank(slug: string): number | null {
+async function estimatePlayerRank(slug: string): Promise<number | null> {
   const db = getDb();
-  // El ranking del jugador aparece como opponent_rank cuando otros jugaron contra él
-  const rows = db.prepare(`
-    SELECT opponent_rank FROM player_match_stats
-    WHERE opponent_slug = ? AND opponent_rank IS NOT NULL
-    ORDER BY match_date DESC LIMIT 10
-  `).all(slug) as { opponent_rank: number }[];
+  const result = await db.execute({
+    sql: `
+      SELECT opponent_rank FROM player_match_stats
+      WHERE opponent_slug = ? AND opponent_rank IS NOT NULL
+      ORDER BY match_date DESC LIMIT 10
+    `,
+    args: [slug],
+  });
+  const rows = result.rows as unknown as { opponent_rank: number }[];
   if (rows.length === 0) return null;
-  // Mediana para evitar outliers
   const ranks = rows.map((r) => r.opponent_rank).sort((a, b) => a - b);
   return ranks[Math.floor(ranks.length / 2)];
 }
@@ -276,12 +289,16 @@ function rankBracketKey(rank: number | null): "top10" | "top20" | "top50" | "top
 
 // ── Rest days ─────────────────────────────────────────────
 
-function getLastMatchDate(slug: string, beforeDate: string): string | null {
+async function getLastMatchDate(slug: string, beforeDate: string): Promise<string | null> {
   const db = getDb();
-  const row = db.prepare(`
-    SELECT MAX(match_date) as last FROM player_match_stats
-    WHERE te_slug = ? AND match_date < ? AND result IS NOT NULL
-  `).get(slug, beforeDate) as { last: string | null };
+  const result = await db.execute({
+    sql: `
+      SELECT MAX(match_date) as last FROM player_match_stats
+      WHERE te_slug = ? AND match_date < ? AND result IS NOT NULL
+    `,
+    args: [slug, beforeDate],
+  });
+  const row = result.rows[0] as unknown as { last: string | null } | undefined;
   return row?.last ?? null;
 }
 
@@ -547,7 +564,7 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
   ]);
 
   // ── 2. Court model ────────────────────────────────────────
-  const courtModel = getTournamentCourtModel(input.tournament);
+  const courtModel = await getTournamentCourtModel(input.tournament);
   const courtSpeed = courtModel?.court_speed ?? null;
   const csiProfile = courtSpeed == null ? null
     : courtSpeed >= 65 ? "fast"
@@ -556,7 +573,7 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
     : "slow";
 
   // ── 3. H2H ────────────────────────────────────────────────
-  const h2hData = getH2H(p1, p2);
+  const h2hData = await getH2H(p1, p2);
   const h2h = { p1Wins: h2hData.p1Wins, p2Wins: h2hData.p2Wins, total: h2hData.total, lastMatches: h2hData.lastMatches };
 
   // ── 4. Clima ──────────────────────────────────────────────
@@ -569,28 +586,34 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
   }
 
   // ── 5. Datos auxiliares (rank, forma, descanso) ───────────
-  const [form1, form2] = [
+  const [form1, form2] = await Promise.all([
     getRecentForm3m(p1, today),
     getRecentForm3m(p2, today),
-  ];
+  ]);
 
-  const p1RankEstimated = input.player1Rank ?? estimatePlayerRank(p1);
-  const p2RankEstimated = input.player2Rank ?? estimatePlayerRank(p2);
+  const [p1RankEstimated, p2RankEstimated] = await Promise.all([
+    input.player1Rank !== undefined ? Promise.resolve(input.player1Rank) : estimatePlayerRank(p1),
+    input.player2Rank !== undefined ? Promise.resolve(input.player2Rank) : estimatePlayerRank(p2),
+  ]);
 
-  const p1LastMatch = getLastMatchDate(p1, today);
-  const p2LastMatch = getLastMatchDate(p2, today);
+  const [p1LastMatch, p2LastMatch] = await Promise.all([
+    getLastMatchDate(p1, today),
+    getLastMatchDate(p2, today),
+  ]);
 
   const daysRest1 = p1LastMatch ? Math.round((new Date(today).getTime() - new Date(p1LastMatch).getTime()) / 86400000) : null;
   const daysRest2 = p2LastMatch ? Math.round((new Date(today).getTime() - new Date(p2LastMatch).getTime()) / 86400000) : null;
 
   // ── 5b. Confianza estadística por jugador ─────────────────
-  const conf1 = computePlayerConfidence(p1);
-  const conf2 = computePlayerConfidence(p2);
+  const [conf1, conf2] = await Promise.all([
+    computePlayerConfidence(p1),
+    computePlayerConfidence(p2),
+  ]);
 
   // ── 5c. Análisis de matchup (necesario para factor táctico) ─
-  let matchupEarly: ReturnType<typeof analyzeMatchup>;
+  let matchupEarly: Awaited<ReturnType<typeof analyzeMatchup>>;
   try {
-    matchupEarly = analyzeMatchup(p1, p2, pat1, pat2, {
+    matchupEarly = await analyzeMatchup(p1, p2, pat1, pat2, {
       surface: input.surface,
       tourneyLevel: input.tourneyLevel,
       tournament: input.tournament,
@@ -601,7 +624,7 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
     });
   } catch (e) {
     console.warn("[engine] analyzeMatchup early error:", (e as Error).message);
-    matchupEarly = analyzeMatchup(p1, p2, pat1, pat2, { surface: input.surface, tourneyLevel: input.tourneyLevel, tournament: input.tournament });
+    matchupEarly = await analyzeMatchup(p1, p2, pat1, pat2, { surface: input.surface, tourneyLevel: input.tourneyLevel, tournament: input.tournament });
   }
 
   // ── 6. Construir los 11 factores ──────────────────────────
@@ -770,8 +793,8 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
   })();
 
   // ─── Factor 5: H2H en superficie similar (10%) ────────────
-  (() => {
-    const h2hSurf = getH2HSurface(p1, p2, input.surface);
+  await (async () => {
+    const h2hSurf = await getH2HSurface(p1, p2, input.surface);
     const hasData = h2hSurf.total >= 2;
     const p1WinRate = h2hSurf.total > 0 ? h2hSurf.p1Wins / h2hSurf.total : null;
     const rawAdv = p1WinRate != null ? clamp((p1WinRate - 0.5) * 2, -1, 1) : 0;
@@ -968,7 +991,7 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
   })();
 
   // ─── Leer calibración aprendida ───────────────────────────
-  const calibration = getCalibration();
+  const calibration = await getCalibration();
   const calibrationMults: Record<string, number> = {};
   for (const [id, cal] of Object.entries(calibration)) {
     calibrationMults[id] = cal.weight_mult;
@@ -1080,11 +1103,13 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
   const p1Streak = computeCurrentStreak(pat1?.recentForm);
   const p2Streak = computeCurrentStreak(pat2?.recentForm);
 
-  let p1Insights: ReturnType<typeof getPlayerInsights> | null = null;
-  let p2Insights: ReturnType<typeof getPlayerInsights> | null = null;
+  let p1Insights: Awaited<ReturnType<typeof getPlayerInsights>> | null = null;
+  let p2Insights: Awaited<ReturnType<typeof getPlayerInsights>> | null = null;
   try {
-    p1Insights = getPlayerInsights(p1);
-    p2Insights = getPlayerInsights(p2);
+    [p1Insights, p2Insights] = await Promise.all([
+      getPlayerInsights(p1),
+      getPlayerInsights(p2),
+    ]);
   } catch { /* insights no disponibles */ }
 
   let tacticalAnalysis: TacticalAnalysis | undefined;

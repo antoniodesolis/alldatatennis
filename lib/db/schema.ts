@@ -1,19 +1,20 @@
 import { getDb } from "./client";
 
-export function runMigrations() {
+export async function runMigrations(): Promise<void> {
   const db = getDb();
 
-  db.exec(`
-    -- Registro canónico de jugadores
+  // ── Tabla de jugadores ────────────────────────────────────
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS players (
       te_slug     TEXT PRIMARY KEY,
       atp_code    TEXT,
       full_name   TEXT,
       sackmann_id INTEGER,
       created_at  INTEGER DEFAULT (unixepoch())
-    );
+    )
+  `);
 
-    -- Estadísticas por partido por jugador
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS player_match_stats (
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
       te_slug         TEXT NOT NULL,
@@ -26,7 +27,6 @@ export function runMigrations() {
       result          TEXT,
       score           TEXT,
       duration_min    INTEGER,
-      -- Servicio
       aces            INTEGER,
       double_faults   INTEGER,
       serve_pts       INTEGER,
@@ -36,62 +36,67 @@ export function runMigrations() {
       serve_games     INTEGER,
       bp_saved        INTEGER,
       bp_faced        INTEGER,
-      -- Resto
       return_pts_won  INTEGER,
-      -- Golpes
       winners         INTEGER,
       unforced_errors INTEGER,
-      -- Origen del dato
       source          TEXT,
       fetched_at      INTEGER DEFAULT (unixepoch()),
       UNIQUE(te_slug, te_match_id)
-    );
+    )
+  `);
 
+  await db.execute(`
     CREATE INDEX IF NOT EXISTS idx_pms_slug_date
-      ON player_match_stats(te_slug, match_date DESC);
+      ON player_match_stats(te_slug, match_date DESC)
+  `);
 
+  await db.execute(`
     CREATE INDEX IF NOT EXISTS idx_pms_slug_surface
-      ON player_match_stats(te_slug, surface, match_date DESC);
+      ON player_match_stats(te_slug, surface, match_date DESC)
   `);
 
   // ── Tablas de aprendizaje automático ─────────────────────
-  db.exec(`
-    -- Log de predicciones: almacena cada predicción hecha + resultado real cuando se conoce
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS prediction_log (
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      match_id        TEXT NOT NULL,          -- ID TE del partido
-      match_date      TEXT NOT NULL,          -- YYYY-MM-DD
+      match_id        TEXT NOT NULL,
+      match_date      TEXT NOT NULL,
       player1_slug    TEXT NOT NULL,
       player2_slug    TEXT NOT NULL,
       tournament      TEXT,
       surface         TEXT,
       tourney_level   TEXT,
-      predicted_p1_pct REAL NOT NULL,         -- probabilidad predicha para p1 (0-100)
-      actual_winner   TEXT,                   -- "p1" | "p2" | NULL si no resuelto
-      prediction_error REAL,                  -- |predicted_p1_pct/100 - actual_binary|, NULL si no resuelto
-      factors_json    TEXT NOT NULL,          -- JSON con todos los factores y sus pesos/ventajas
+      predicted_p1_pct REAL NOT NULL,
+      actual_winner   TEXT,
+      prediction_error REAL,
+      factors_json    TEXT NOT NULL,
       created_at      INTEGER DEFAULT (unixepoch()),
       resolved_at     INTEGER,
       UNIQUE(match_id, player1_slug)
-    );
+    )
+  `);
 
-    CREATE INDEX IF NOT EXISTS idx_pred_log_date ON prediction_log(match_date DESC);
-    CREATE INDEX IF NOT EXISTS idx_pred_log_resolved ON prediction_log(resolved_at) WHERE resolved_at IS NULL;
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_pred_log_date ON prediction_log(match_date DESC)
+  `);
 
-    -- Calibración de factores: ajuste aprendido por factor a partir del historial de errores
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_pred_log_resolved ON prediction_log(resolved_at) WHERE resolved_at IS NULL
+  `);
+
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS factor_calibration (
-      factor_id       TEXT PRIMARY KEY,       -- "csi_exact", "recent_form_3m", etc.
-      sample_count    INTEGER DEFAULT 0,      -- nº de predicciones resueltas que usan este factor
-      avg_accuracy    REAL DEFAULT 0.5,       -- 0-1 promedio de aciertos cuando este factor favorece al ganador
-      avg_error       REAL DEFAULT 0.0,       -- error cuadrático medio cuando el factor tiene datos
-      weight_mult     REAL DEFAULT 1.0,       -- multiplicador aprendido (>1 = reforzar, <1 = penalizar)
+      factor_id       TEXT PRIMARY KEY,
+      sample_count    INTEGER DEFAULT 0,
+      avg_accuracy    REAL DEFAULT 0.5,
+      avg_error       REAL DEFAULT 0.0,
+      weight_mult     REAL DEFAULT 1.0,
       last_updated    INTEGER DEFAULT (unixepoch())
-    );
+    )
   `);
 
   // ── Enriquecimiento post-partido ─────────────────────────
-  db.exec(`
-    -- Crónicas e insights por partido
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS match_insights (
       te_match_id     TEXT PRIMARY KEY,
       match_date      TEXT NOT NULL,
@@ -100,24 +105,25 @@ export function runMigrations() {
       tournament      TEXT,
       surface         TEXT,
       score           TEXT,
-      match_pattern   TEXT,          -- dominio|batalla|irregular|remontada|walkover
-      chronicle_url   TEXT,          -- URL de la crónica (null si solo marcador)
-      chronicle_src   TEXT,          -- dominio fuente
-      insights_json   TEXT,          -- MatchInsights serializado
+      match_pattern   TEXT,
+      chronicle_url   TEXT,
+      chronicle_src   TEXT,
+      insights_json   TEXT,
       enriched_at     INTEGER DEFAULT (unixepoch())
-    );
+    )
+  `);
 
-    -- Insights acumulados por jugador (actualizados con cada partido)
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS player_insights (
       te_slug         TEXT PRIMARY KEY,
       insights_json   TEXT NOT NULL DEFAULT '{}',
       match_count     INTEGER DEFAULT 0,
       updated_at      INTEGER DEFAULT (unixepoch())
-    );
+    )
   `);
 
   // ── Rankings ATP persistidos ─────────────────────────────
-  db.exec(`
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS atp_rankings (
       rank        INTEGER NOT NULL,
       atp_code    TEXT NOT NULL,
@@ -126,11 +132,14 @@ export function runMigrations() {
       points      TEXT DEFAULT '',
       updated_at  INTEGER NOT NULL DEFAULT (unixepoch()),
       PRIMARY KEY (rank, updated_at)
-    );
-    CREATE INDEX IF NOT EXISTS idx_rankings_updated ON atp_rankings(updated_at DESC);
+    )
   `);
 
-  // Migraciones aditivas — ADD COLUMN falla si ya existe, lo ignoramos
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_rankings_updated ON atp_rankings(updated_at DESC)
+  `);
+
+  // ── Migraciones aditivas ──────────────────────────────────
   const addCols = [
     "ALTER TABLE player_match_stats ADD COLUMN match_time        TEXT",
     "ALTER TABLE player_match_stats ADD COLUMN time_of_day       TEXT",
@@ -145,43 +154,42 @@ export function runMigrations() {
     "ALTER TABLE player_match_stats ADD COLUMN tb_won            INTEGER",
     "ALTER TABLE player_match_stats ADD COLUMN bp_converted      INTEGER",
     "ALTER TABLE player_match_stats ADD COLUMN bp_opportunities  INTEGER",
-    "ALTER TABLE player_match_stats ADD COLUMN court_speed       REAL",   // 0-100 índice de velocidad de pista
+    "ALTER TABLE player_match_stats ADD COLUMN court_speed       REAL",
   ];
   for (const sql of addCols) {
-    try { db.exec(sql); } catch { /* columna ya existe */ }
+    try { await db.execute(sql); } catch { /* column already exists */ }
   }
 
-  db.exec(`
-    -- Control de partidos ya procesados
+  // ── Tablas adicionales ────────────────────────────────────
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS processed_matches (
       te_match_id  TEXT PRIMARY KEY,
       processed_at INTEGER DEFAULT (unixepoch()),
       status       TEXT
-    );
+    )
+  `);
 
-    -- Modelos de velocidad de pista por torneo
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS tournament_models (
       tourney_name        TEXT PRIMARY KEY,
       surface             TEXT,
-      years               TEXT,          -- JSON array e.g. [2022,2023,2024]
-      matches             INTEGER,       -- nº de filas usadas para el cálculo
-      -- Métricas brutas (promedios de todos los jugadores en ese torneo)
-      ace_rate            REAL,          -- aces / serve_pts
-      first_in_pct        REAL,          -- first_in / serve_pts
-      first_won_pct       REAL,          -- first_won / first_in
-      second_won_pct      REAL,          -- second_won / (serve_pts - first_in)
-      hold_pct            REAL,          -- 1 - bp_conversion (bp_conv/bp_opp)
-      tiebreak_rate       REAL,          -- tb_played / sets_played
+      years               TEXT,
+      matches             INTEGER,
+      ace_rate            REAL,
+      first_in_pct        REAL,
+      first_won_pct       REAL,
+      second_won_pct      REAL,
+      hold_pct            REAL,
+      tiebreak_rate       REAL,
       avg_duration        REAL,
-      -- Índice derivado
-      court_speed         REAL,          -- 0-100 global (calculado relativo a todos los torneos)
-      court_profile       TEXT,          -- "fast"|"medium-fast"|"medium"|"medium-slow"|"slow"
-      -- Qué estilos favorece (JSON: {style: differential_pp})
+      court_speed         REAL,
+      court_profile       TEXT,
       style_affinity      TEXT,
       computed_at         INTEGER
-    );
+    )
+  `);
 
-    -- Caché de patrones computados
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS player_patterns (
       te_slug             TEXT NOT NULL,
       surface             TEXT NOT NULL DEFAULT '',
@@ -199,6 +207,6 @@ export function runMigrations() {
       avg_unforced        REAL,
       patterns_json       TEXT,
       PRIMARY KEY (te_slug, surface, window_n)
-    );
+    )
   `);
 }
