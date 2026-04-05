@@ -641,13 +641,20 @@ export default function Home() {
                         {pred && (
                           <div style={{ padding: "24px" }}>
                             {/* Header: fotos grandes + porcentajes */}
+                            {(() => {
+                              const p1IsFav = pred.player1.winPct >= pred.player2.winPct;
+                              const favStyle = { color: "var(--acid)" };
+                              const dogStyle = { color: "rgba(255,255,255,0.45)" };
+                              const favBorder = "2px solid rgba(200,241,53,0.45)";
+                              const dogBorder = "2px solid rgba(255,255,255,0.1)";
+                              return (
                             <div className="flex items-center gap-6 mb-6">
                               {/* Jugador 1 */}
                               <div className="flex flex-col items-center gap-2" style={{ minWidth: 72 }}>
                                 <PlayerPhoto name={m.player1} slug={p1Slug} rankingMap={rankingMap} size={72}
-                                  style={{ border: "2px solid rgba(200,241,53,0.3)" }} />
-                                <div className="pct-num" style={{ color: "var(--acid)" }}>{pred.player1.winPct}%</div>
-                                <div className="fb text-xs font-semibold text-center leading-tight" style={{ color: "rgba(255,255,255,0.8)", maxWidth: 80 }}>
+                                  style={{ border: p1IsFav ? favBorder : dogBorder }} />
+                                <div className="pct-num" style={p1IsFav ? favStyle : dogStyle}>{pred.player1.winPct}%</div>
+                                <div className="fb text-xs font-semibold text-center leading-tight" style={p1IsFav ? { color: "rgba(255,255,255,0.85)", maxWidth: 80 } : { color: "rgba(255,255,255,0.45)", maxWidth: 80 }}>
                                   {pred.player1.name.split(" ").pop()}
                                 </div>
                               </div>
@@ -656,11 +663,11 @@ export default function Home() {
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ position: "relative", marginBottom: 8 }}>
                                   <div className="prob-bar-track" style={{ height: 6 }}>
-                                    <div className="prob-bar-fill" style={{ width: `${pred.player1.winPct}%` }} />
+                                    <div className={p1IsFav ? "prob-bar-fill" : "prob-bar-fill2"} style={{ width: `${pred.player1.winPct}%` }} />
                                   </div>
                                 </div>
                                 <div className="prob-bar-track" style={{ height: 6, transform: "scaleX(-1)" }}>
-                                  <div className="prob-bar-fill" style={{ width: `${pred.player2.winPct}%`, background: "rgba(255,255,255,0.2)" }} />
+                                  <div className={p1IsFav ? "prob-bar-fill2" : "prob-bar-fill"} style={{ width: `${pred.player2.winPct}%` }} />
                                 </div>
                                 {/* Resultado real */}
                                 {isFinished && m.winner && (() => {
@@ -683,13 +690,15 @@ export default function Home() {
                               {/* Jugador 2 */}
                               <div className="flex flex-col items-center gap-2" style={{ minWidth: 72 }}>
                                 <PlayerPhoto name={m.player2} slug={p2Slug} rankingMap={rankingMap} size={72}
-                                  style={{ border: "2px solid rgba(255,255,255,0.1)" }} />
-                                <div className="pct-num" style={{ color: "rgba(255,255,255,0.5)" }}>{pred.player2.winPct}%</div>
-                                <div className="fb text-xs font-semibold text-center leading-tight" style={{ color: "rgba(255,255,255,0.5)", maxWidth: 80 }}>
+                                  style={{ border: p1IsFav ? dogBorder : favBorder }} />
+                                <div className="pct-num" style={p1IsFav ? dogStyle : favStyle}>{pred.player2.winPct}%</div>
+                                <div className="fb text-xs font-semibold text-center leading-tight" style={p1IsFav ? { color: "rgba(255,255,255,0.45)", maxWidth: 80 } : { color: "rgba(255,255,255,0.85)", maxWidth: 80 }}>
                                   {pred.player2.name.split(" ").pop()}
                                 </div>
                               </div>
                             </div>
+                              );
+                            })()}
 
                             {/* Condiciones del partido */}
                             {pred.weather && (
