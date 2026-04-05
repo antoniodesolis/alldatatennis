@@ -91,10 +91,10 @@ export async function resolveFinishedMatches(
   const now = Math.floor(Date.now() / 1000);
   let resolved = 0;
 
-  await db.execute("BEGIN");
+  const tx = await db.transaction("write");
   try {
     for (const { matchId, winnerSlug } of finishedMatches) {
-      const findResult = await db.execute({
+      const findResult = await tx.execute({
         sql: "SELECT id, player1_slug, player2_slug, predicted_p1_pct FROM prediction_log WHERE match_id = ? AND resolved_at IS NULL",
         args: [matchId],
       });
@@ -111,7 +111,7 @@ export async function resolveFinishedMatches(
       const predProb = pred.predicted_p1_pct / 100;
       const error = Math.abs(predProb - actualBinary);
 
-      await db.execute({
+      await tx.execute({
         sql: `
           UPDATE prediction_log SET
             actual_winner    = ?,
@@ -123,10 +123,12 @@ export async function resolveFinishedMatches(
       });
       resolved++;
     }
-    await db.execute("COMMIT");
+    await tx.commit();
   } catch (e) {
-    await db.execute("ROLLBACK");
+    await tx.rollback();
     throw e;
+  } finally {
+    tx.close();
   }
 
   return resolved;
@@ -184,7 +186,7 @@ export async function recomputeCalibration(): Promise<Record<string, FactorCalib
 
   const calibrations: Record<string, FactorCalibration> = {};
 
-  await db.execute("BEGIN");
+  const tx = await db.transaction("write");
   try {
     for (const [factorId, s] of Object.entries(stats)) {
       const accuracy = s.total > 0 ? s.correct / s.total : 0.5;
@@ -194,7 +196,7 @@ export async function recomputeCalibration(): Promise<Record<string, FactorCalib
       const rawMult = 1.0 + (accuracy - 0.5) * 2 * confidence;
       const weightMult = Math.max(0.4, Math.min(1.8, rawMult));
 
-      await db.execute({
+      await tx.execute({
         sql: `
           INSERT INTO factor_calibration (factor_id, sample_count, avg_accuracy, avg_error, weight_mult, last_updated)
           VALUES (?, ?, ?, ?, ?, unixepoch())
@@ -215,10 +217,12 @@ export async function recomputeCalibration(): Promise<Record<string, FactorCalib
         weight_mult: weightMult,
       };
     }
-    await db.execute("COMMIT");
+    await tx.commit();
   } catch (e) {
-    await db.execute("ROLLBACK");
+    await tx.rollback();
     throw e;
+  } finally {
+    tx.close();
   }
 
   return calibrations;

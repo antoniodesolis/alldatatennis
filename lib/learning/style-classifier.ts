@@ -53,13 +53,13 @@ export async function backfillOpponentStyles(): Promise<number> {
 
   let updated = 0;
 
-  await db.execute("BEGIN");
+  const tx = await db.transaction("write");
   try {
     for (const { opponent_slug } of slugsWithNull) {
       let style: PlayerStyle | null = PLAYER_STYLES[opponent_slug] ?? null;
 
       if (!style) {
-        const patResult = await db.execute({
+        const patResult = await tx.execute({
           sql: `
             SELECT matches_used, win_rate, avg_aces, first_serve_won_pct, second_serve_won_pct,
                    bp_save_pct, avg_winners, avg_unforced, patterns_json
@@ -98,17 +98,19 @@ export async function backfillOpponentStyles(): Promise<number> {
       }
 
       if (style) {
-        const updateResult = await db.execute({
+        const updateResult = await tx.execute({
           sql: "UPDATE player_match_stats SET opponent_style = ? WHERE opponent_slug = ? AND opponent_style IS NULL",
           args: [style, opponent_slug],
         });
         updated += updateResult.rowsAffected;
       }
     }
-    await db.execute("COMMIT");
+    await tx.commit();
   } catch (e) {
-    await db.execute("ROLLBACK");
+    await tx.rollback();
     throw e;
+  } finally {
+    tx.close();
   }
 
   return updated;
@@ -134,12 +136,12 @@ export async function reclassifyAllStyles(): Promise<Array<{ slug: string; style
 
   const results: Array<{ slug: string; style: PlayerStyle; source: "static" | "inferred" }> = [];
 
-  await db.execute("BEGIN");
+  const tx = await db.transaction("write");
   try {
     for (const row of patterns) {
       const staticStyle = PLAYER_STYLES[row.te_slug];
       if (staticStyle) {
-        await db.execute({
+        await tx.execute({
           sql: "UPDATE player_match_stats SET opponent_style = ? WHERE opponent_slug = ? AND opponent_style IS NULL",
           args: [staticStyle, row.te_slug],
         });
@@ -166,17 +168,19 @@ export async function reclassifyAllStyles(): Promise<Array<{ slug: string; style
       });
 
       if (inferred) {
-        await db.execute({
+        await tx.execute({
           sql: "UPDATE player_match_stats SET opponent_style = ? WHERE opponent_slug = ? AND opponent_style IS NULL",
           args: [inferred, row.te_slug],
         });
         results.push({ slug: row.te_slug, style: inferred, source: "inferred" });
       }
     }
-    await db.execute("COMMIT");
+    await tx.commit();
   } catch (e) {
-    await db.execute("ROLLBACK");
+    await tx.rollback();
     throw e;
+  } finally {
+    tx.close();
   }
 
   return results;

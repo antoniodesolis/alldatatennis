@@ -24,30 +24,30 @@ export async function POST() {
   const db = getDb();
   const results: Array<{ alias: string; canonical: string; teSlugRows: number; oppSlugRows: number }> = [];
 
-  await db.execute("BEGIN");
+  const tx = await db.transaction("write");
   try {
     for (const [alias, canonical] of Object.entries(SLUG_MERGES)) {
-      const r1 = await db.execute({
+      const r1 = await tx.execute({
         sql: "UPDATE player_match_stats SET te_slug = ? WHERE te_slug = ?",
         args: [canonical, alias],
       });
-      const r2 = await db.execute({
+      const r2 = await tx.execute({
         sql: "UPDATE player_match_stats SET opponent_slug = ? WHERE opponent_slug = ?",
         args: [canonical, alias],
       });
 
-      const hasCanonicalResult = await db.execute({
+      const hasCanonicalResult = await tx.execute({
         sql: "SELECT 1 FROM players WHERE te_slug = ?",
         args: [canonical],
       });
 
       if (hasCanonicalResult.rows.length === 0) {
-        await db.execute({
+        await tx.execute({
           sql: "UPDATE players SET te_slug = ? WHERE te_slug = ?",
           args: [canonical, alias],
         });
       } else {
-        await db.execute({
+        await tx.execute({
           sql: "DELETE FROM players WHERE te_slug = ?",
           args: [alias],
         });
@@ -55,10 +55,12 @@ export async function POST() {
 
       results.push({ alias, canonical, teSlugRows: r1.rowsAffected, oppSlugRows: r2.rowsAffected });
     }
-    await db.execute("COMMIT");
+    await tx.commit();
   } catch (e) {
-    await db.execute("ROLLBACK");
+    await tx.rollback();
     throw e;
+  } finally {
+    tx.close();
   }
 
   const patternsResult = await db.execute("DELETE FROM player_patterns");

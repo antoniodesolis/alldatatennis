@@ -56,22 +56,22 @@ async function enrichNewRanks(): Promise<number> {
   const slugRankMap = buildSlugRankMap();
   const atpSlugSet = new Set(Object.keys(ATP_SLUG_MAP));
 
+  let total = 0;
+
+  const tx = await db.transaction("write");
   const getStillNull = async () => {
-    const r = await db.execute(
+    const r = await tx.execute(
       "SELECT DISTINCT opponent_slug FROM player_match_stats WHERE source='te_history' AND opponent_rank IS NULL AND opponent_slug IS NOT NULL"
     );
     return (r.rows as unknown as { opponent_slug: string }[]).map((row) => row.opponent_slug);
   };
 
-  let total = 0;
-
-  await db.execute("BEGIN");
   try {
     // Pass 1: top-100
     for (const slug of await getStillNull()) {
       const rank = slugRankMap.get(slug);
       if (rank) {
-        const r = await db.execute({
+        const r = await tx.execute({
           sql: "UPDATE player_match_stats SET opponent_rank = ? WHERE source='te_history' AND opponent_slug = ? AND opponent_rank IS NULL",
           args: [rank, slug],
         });
@@ -80,13 +80,13 @@ async function enrichNewRanks(): Promise<number> {
     }
     // Pass 2: sackmann
     for (const slug of await getStillNull()) {
-      const r = await db.execute({
+      const r = await tx.execute({
         sql: "SELECT opponent_rank FROM player_match_stats WHERE source='sackmann_csv' AND opponent_slug = ? AND opponent_rank IS NOT NULL ORDER BY match_date DESC LIMIT 1",
         args: [slug],
       });
       const row = r.rows[0] as unknown as { opponent_rank: number } | undefined;
       if (row) {
-        const upd = await db.execute({
+        const upd = await tx.execute({
           sql: "UPDATE player_match_stats SET opponent_rank = ? WHERE source='te_history' AND opponent_slug = ? AND opponent_rank IS NULL",
           args: [row.opponent_rank, slug],
         });
@@ -95,14 +95,14 @@ async function enrichNewRanks(): Promise<number> {
     }
     // Pass 3: peer inference ≥3
     for (const slug of await getStillNull()) {
-      const r = await db.execute({
+      const r = await tx.execute({
         sql: "SELECT opponent_rank FROM player_match_stats WHERE te_slug = ? AND opponent_rank IS NOT NULL ORDER BY match_date DESC LIMIT 30",
         args: [slug],
       });
       const rows = r.rows as unknown as { opponent_rank: number }[];
       if (rows.length >= 3) {
         const sorted = rows.map((row) => row.opponent_rank).sort((a, b) => a - b);
-        const upd = await db.execute({
+        const upd = await tx.execute({
           sql: "UPDATE player_match_stats SET opponent_rank = ? WHERE source='te_history' AND opponent_slug = ? AND opponent_rank IS NULL",
           args: [median(sorted), slug],
         });
@@ -112,7 +112,7 @@ async function enrichNewRanks(): Promise<number> {
     // Pass 4: ATP map default 150
     for (const slug of await getStillNull()) {
       if (atpSlugSet.has(slug)) {
-        const upd = await db.execute({
+        const upd = await tx.execute({
           sql: "UPDATE player_match_stats SET opponent_rank = ? WHERE source='te_history' AND opponent_slug = ? AND opponent_rank IS NULL",
           args: [150, slug],
         });
@@ -121,14 +121,14 @@ async function enrichNewRanks(): Promise<number> {
     }
     // Pass 5: peer inference ≥1
     for (const slug of await getStillNull()) {
-      const r = await db.execute({
+      const r = await tx.execute({
         sql: "SELECT opponent_rank FROM player_match_stats WHERE te_slug = ? AND opponent_rank IS NOT NULL ORDER BY match_date DESC LIMIT 30",
         args: [slug],
       });
       const rows = r.rows as unknown as { opponent_rank: number }[];
       if (rows.length >= 1) {
         const sorted = rows.map((row) => row.opponent_rank).sort((a, b) => a - b);
-        const upd = await db.execute({
+        const upd = await tx.execute({
           sql: "UPDATE player_match_stats SET opponent_rank = ? WHERE source='te_history' AND opponent_slug = ? AND opponent_rank IS NULL",
           args: [median(sorted), slug],
         });
@@ -136,15 +136,17 @@ async function enrichNewRanks(): Promise<number> {
       }
     }
     // Pass 6: universal default 250
-    const upd6 = await db.execute(
+    const upd6 = await tx.execute(
       "UPDATE player_match_stats SET opponent_rank = 250 WHERE source='te_history' AND opponent_rank IS NULL AND opponent_slug IS NOT NULL"
     );
     total += upd6.rowsAffected;
 
-    await db.execute("COMMIT");
+    await tx.commit();
   } catch (e) {
-    await db.execute("ROLLBACK");
+    await tx.rollback();
     throw e;
+  } finally {
+    tx.close();
   }
 
   return total;
@@ -159,23 +161,25 @@ async function normalizeNewSlugs(): Promise<number> {
   };
   let updated = 0;
 
-  await db.execute("BEGIN");
+  const tx = await db.transaction("write");
   try {
     for (const [alias, canonical] of Object.entries(SLUG_MERGES)) {
-      const r1 = await db.execute({
+      const r1 = await tx.execute({
         sql: "UPDATE player_match_stats SET te_slug = ? WHERE te_slug = ?",
         args: [canonical, alias],
       });
-      const r2 = await db.execute({
+      const r2 = await tx.execute({
         sql: "UPDATE player_match_stats SET opponent_slug = ? WHERE opponent_slug = ?",
         args: [canonical, alias],
       });
       updated += r1.rowsAffected + r2.rowsAffected;
     }
-    await db.execute("COMMIT");
+    await tx.commit();
   } catch (e) {
-    await db.execute("ROLLBACK");
+    await tx.rollback();
     throw e;
+  } finally {
+    tx.close();
   }
 
   return updated;
@@ -203,10 +207,10 @@ async function resolveByDateSlug(date: string): Promise<number> {
   if (pending.length === 0) return 0;
 
   let resolved = 0;
-  await db.execute("BEGIN");
+  const tx = await db.transaction("write");
   try {
     for (const pred of pending) {
-      const winnerResult = await db.execute({
+      const winnerResult = await tx.execute({
         sql: `
           SELECT te_slug
           FROM player_match_stats
@@ -226,16 +230,18 @@ async function resolveByDateSlug(date: string): Promise<number> {
       const actualBinary = actualWinner === "p1" ? 1.0 : 0.0;
       const error = Math.abs(pred.predicted_p1_pct / 100 - actualBinary);
 
-      await db.execute({
+      await tx.execute({
         sql: "UPDATE prediction_log SET actual_winner = ?, prediction_error = ?, resolved_at = ? WHERE id = ?",
         args: [actualWinner, error, now, pred.id],
       });
       resolved++;
     }
-    await db.execute("COMMIT");
+    await tx.commit();
   } catch (e) {
-    await db.execute("ROLLBACK");
+    await tx.rollback();
     throw e;
+  } finally {
+    tx.close();
   }
 
   return resolved;

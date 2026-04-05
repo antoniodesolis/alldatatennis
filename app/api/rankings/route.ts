@@ -185,19 +185,21 @@ export async function saveRankingsToDB(players: ATPPlayer[]): Promise<void> {
       sql: `DELETE FROM atp_rankings WHERE updated_at <= ?`,
       args: [now - 30 * 24 * 3600],
     });
-    await db.execute("BEGIN");
+    const tx = await db.transaction("write");
     try {
       for (const p of players) {
-        await db.execute({
+        await tx.execute({
           sql: `INSERT OR REPLACE INTO atp_rankings (rank, atp_code, name, country, points, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)`,
           args: [p.rank, p.atpCode, p.name, p.country, p.points, now],
         });
       }
-      await db.execute("COMMIT");
+      await tx.commit();
     } catch (e) {
-      await db.execute("ROLLBACK");
+      await tx.rollback();
       throw e;
+    } finally {
+      tx.close();
     }
     console.log(`[rankings] ${players.length} rankings guardados en DB (ts=${now})`);
   } catch (e) {
