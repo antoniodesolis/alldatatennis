@@ -50,6 +50,25 @@ function predictionOutcome(
   return predictedWinner === m.winner ? "correct" : "wrong";
 }
 
+// Hermanos y homónimos: cuando el slug es ambiguo, el nombre del jugador desambigua.
+// Clave: "<apellido_slug>/<inicial_o_nombre_lower>" → slug correcto.
+const SIBLING_SLUG: Record<string, string> = {
+  "cerundolo/j":             "juan-cerundolo",
+  "cerundolo/juan":          "juan-cerundolo",
+  "cerundolo/f":             "cerundolo",
+  "cerundolo/francisco":     "cerundolo",
+};
+
+/** Devuelve el slug correcto teniendo en cuenta posibles hermanos. */
+function resolveSlug(rawSlug: string, playerName: string): string {
+  const lastPart = rawSlug.split("-").pop()?.toLowerCase() ?? rawSlug.toLowerCase();
+  const nameParts = playerName.trim().toLowerCase().split(/\s+/);
+  // Primera parte del nombre (inicial o nombre de pila)
+  const firstToken = nameParts[0].replace(/\.$/, ""); // "j." → "j", "juan" → "juan"
+  const key = `${lastPart}/${firstToken}`;
+  return SIBLING_SLUG[key] ?? rawSlug;
+}
+
 function lastName(name: string): string {
   const parts = name.trim().split(/\s+/);
   // Si el último token es una inicial (1-2 chars con punto), el apellido es el primero
@@ -534,8 +553,8 @@ export default function Home() {
                       </div>
 
                       {/* Jugadores */}
-                      <a href={`/player/${m.player1Slug}`} onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit", minWidth: 0 }}>
-                        <PlayerPhoto name={m.player1} slug={m.player1Slug} rankingMap={rankingMap} size={52}
+                      <a href={`/player/${resolveSlug(m.player1Slug, m.player1)}`} onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit", minWidth: 0 }}>
+                        <PlayerPhoto name={m.player1} slug={resolveSlug(m.player1Slug, m.player1)} rankingMap={rankingMap} size={52}
                           style={{ opacity: isFinished && m.winner === "player2" ? 0.45 : 1 }} />
                         <div style={{ minWidth: 0 }}>
                           <div className={`fb text-base leading-tight ${isFinished && m.winner === "player2" ? "font-normal" : "font-semibold"}`}
@@ -551,8 +570,8 @@ export default function Home() {
                         </div>
                       </a>
                       <div className="fm text-[10px]" style={{ color: "var(--muted)", flexShrink: 0 }}>VS</div>
-                      <a href={`/player/${m.player2Slug}`} onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit", minWidth: 0 }}>
-                        <PlayerPhoto name={m.player2} slug={m.player2Slug} rankingMap={rankingMap} size={52}
+                      <a href={`/player/${resolveSlug(m.player2Slug, m.player2)}`} onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit", minWidth: 0 }}>
+                        <PlayerPhoto name={m.player2} slug={resolveSlug(m.player2Slug, m.player2)} rankingMap={rankingMap} size={52}
                           style={{ opacity: isFinished && m.winner === "player1" ? 0.45 : 1 }} />
                         <div style={{ minWidth: 0 }}>
                           <div className={`fb text-base leading-tight ${isFinished && m.winner === "player1" ? "font-normal" : "font-semibold"}`}
