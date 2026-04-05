@@ -17,6 +17,7 @@ import { backfillOpponentStyles, reclassifyAllStyles } from "@/lib/learning/styl
 import { getPlayerPatterns, resetPatterns } from "@/lib/analytics/patterns";
 import { analyzeMatch } from "@/lib/analytics/match-patterns";
 import { refreshMomentumProfile } from "@/lib/analytics/momentum-patterns";
+import { refreshTournamentStats } from "@/lib/analytics/tournament-stats";
 
 // ── ATP_RANK (top-100 atpCode → rank) ─────────────────────
 const ATP_RANK: Record<string, number> = {
@@ -371,6 +372,29 @@ async function generateDayInsights(date: string): Promise<{ generated: number; s
   return { generated, skipped };
 }
 
+async function refreshTournamentsForDate(date: string): Promise<{ refreshed: string[] }> {
+  const db = getDb();
+  const year = parseInt(date.slice(0, 4));
+
+  // Obtener torneos distintos que tienen insights en esta fecha
+  const result = await db.execute({
+    sql: `SELECT DISTINCT tournament FROM match_insights WHERE match_date = ? AND tournament IS NOT NULL`,
+    args: [date],
+  });
+  const tourneys = (result.rows as unknown as { tournament: string }[]).map((r) => r.tournament);
+
+  const refreshed: string[] = [];
+  for (const name of tourneys) {
+    try {
+      await refreshTournamentStats(name, year);
+      refreshed.push(name);
+    } catch {
+      // ignorar errores individuales
+    }
+  }
+  return { refreshed };
+}
+
 async function recomputePatternsForSlugs(slugs: string[]): Promise<{ recomputed: number; errors: number }> {
   let recomputed = 0;
   let errors = 0;
@@ -454,6 +478,15 @@ export async function POST(req: NextRequest) {
     result.matchInsights = insightResult;
   } catch (err) {
     result.matchInsights = { error: (err as Error).message };
+  }
+
+  // ── Paso 5b: Agregar estadísticas de torneo ──────────────
+  console.log(`[daily-sync] Refreshing tournament edition stats for ${targetDate}…`);
+  try {
+    const tourneyResult = await refreshTournamentsForDate(targetDate);
+    result.tournamentStats = tourneyResult;
+  } catch (err) {
+    result.tournamentStats = { error: (err as Error).message };
   }
 
   // ── Paso 6: Resolver predicciones del día ────────────────

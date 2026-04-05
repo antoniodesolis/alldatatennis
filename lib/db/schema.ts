@@ -190,6 +190,31 @@ export async function runMigrations(): Promise<void> {
   `);
 
   await db.execute(`
+    CREATE TABLE IF NOT EXISTS tournament_edition_stats (
+      tourney_name        TEXT NOT NULL,
+      year                INTEGER NOT NULL,
+      tourney_slug        TEXT,
+      surface             TEXT,
+      matches_analyzed    INTEGER DEFAULT 0,
+      three_set_rate      REAL,
+      tiebreak_rate       REAL,
+      comeback_rate       REAL,
+      close_set_rate      REAL,
+      dominant_set_rate   REAL,
+      bagel_rate          REAL,
+      pattern_json        TEXT,
+      surface_reading     TEXT,
+      style_wins_json     TEXT,
+      updated_at          INTEGER DEFAULT (unixepoch()),
+      PRIMARY KEY (tourney_name, year)
+    )
+  `);
+
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_tes_slug ON tournament_edition_stats(tourney_slug)
+  `);
+
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS player_patterns (
       te_slug             TEXT NOT NULL,
       surface             TEXT NOT NULL DEFAULT '',

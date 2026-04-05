@@ -33,6 +33,7 @@ import type { TacticalAnalysis } from "../analytics/narrative";
 import { getPlayerInsights } from "../db/queries";
 import { getMomentumProfile, refreshMomentumProfile } from "../analytics/momentum-patterns";
 import type { MomentumProfile } from "../analytics/momentum-patterns";
+import { getTournamentEditionStats, slugifyTourney } from "../analytics/tournament-stats";
 
 // ── Constants ─────────────────────────────────────────────
 
@@ -565,8 +566,11 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
     getPlayerPatterns(p2, "", 50),
   ]);
 
-  // ── 2. Court model ────────────────────────────────────────
-  const courtModel = await getTournamentCourtModel(input.tournament);
+  // ── 2. Court model + edición actual ──────────────────────
+  const [courtModel, editionStats] = await Promise.all([
+    getTournamentCourtModel(input.tournament),
+    getTournamentEditionStats(slugifyTourney(input.tournament)),
+  ]);
   const courtSpeed = courtModel?.court_speed ?? null;
   const csiProfile = courtSpeed == null ? null
     : courtSpeed >= 65 ? "fast"
@@ -1160,6 +1164,9 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
       p2AccumulatedInsights: (p2Insights && p2Insights.matchCount > 0) ? p2Insights : null,
       p1Momentum: (p1Momentum && p1Momentum.matchesAnalyzed >= 5) ? p1Momentum : null,
       p2Momentum: (p2Momentum && p2Momentum.matchesAnalyzed >= 5) ? p2Momentum : null,
+      tournamentEdition: (editionStats && editionStats.matchesAnalyzed >= 3)
+        ? { narrativeLines: editionStats.narrativeLines, surfaceReading: editionStats.surfaceReading, matchesAnalyzed: editionStats.matchesAnalyzed, styleWins: editionStats.styleWins }
+        : null,
     });
   } catch (e) {
     console.error("[engine] generateNarrative error:", (e as Error).message);

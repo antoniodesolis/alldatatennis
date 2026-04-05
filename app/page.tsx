@@ -1,8 +1,18 @@
 "use client";
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
+import Link from "next/link";
 import type { ATPPlayer } from "./api/rankings/route";
 import type { ATPMatch } from "./api/matches/route";
 import type { PredictionResult, FactorResult } from "../lib/prediction/engine";
+
+function slugifyTourney(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "");
+}
 
 function isMainATP(tournament: string) {
   const lower = tournament.toLowerCase();
@@ -614,7 +624,7 @@ export default function Home() {
 
                       {/* Torneo + badges */}
                       <div className="flex flex-wrap gap-2 items-center ml-auto">
-                        <span className="tag tag-g">{m.tournament}</span>
+                        <Link href={`/tournament/${slugifyTourney(m.tournament)}`} className="tag tag-g" style={{ textDecoration: "none", cursor: "pointer" }}>{m.tournament}</Link>
                         {m.round && (
                           <span className="tag" style={/^Q\d?$/i.test(m.round)
                             ? { background: "rgba(255,180,0,0.08)", color: "#f5a623", borderColor: "rgba(255,180,0,0.2)" }

@@ -86,6 +86,14 @@ export interface NarrativeInput {
   // Perfil de momentum (patrones intra-partido acumulados)
   p1Momentum?: MomentumProfile | null;
   p2Momentum?: MomentumProfile | null;
+
+  // Estadísticas de la edición actual del torneo
+  tournamentEdition?: {
+    narrativeLines: string[];
+    surfaceReading: string;
+    matchesAnalyzed: number;
+    styleWins: Record<string, number>;
+  } | null;
 }
 
 export interface AccumulatedInsightsSnap {
@@ -1098,7 +1106,15 @@ export function generateNarrative(input: NarrativeInput): TacticalAnalysis {
   const para3 = buildStoryParagraph(input, matchupType, favLast, dogLast, favIsP1, winPctFav, favoredProfile, underdogProfile);
   const para4 = buildVerdictParagraph(input, matchupType, favLast, dogLast, favIsP1, winPctFav, winPctDog, favoredProfile, underdogProfile);
 
-  const narrative = [para1, para2, para3, para4].filter(Boolean).join("\n\n");
+  // Contexto de edición del torneo: si hay datos suficientes, insertar entre para1 y para2
+  let editionPara = "";
+  if (input.tournamentEdition && input.tournamentEdition.matchesAnalyzed >= 3) {
+    const ed = input.tournamentEdition;
+    const topLine = ed.narrativeLines[0] ?? ed.surfaceReading;
+    if (topLine) editionPara = topLine;
+  }
+
+  const narrative = [para1, editionPara, para2, para3, para4].filter(Boolean).join("\n\n");
 
   const matchupSummary = buildMatchupSummary(matchup, favoredProfile, underdogProfile, favLast, dogLast);
   const keyWeapon = favoredProfile.weapon ?? null;
