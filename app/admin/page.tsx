@@ -1,6 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
 
+// ── Helper: cabecera de auth para todas las llamadas admin ──
+function adminHeaders(secret: string): HeadersInit {
+  return secret ? { "Authorization": `Bearer ${secret}` } : {};
+}
+
 interface RankingStatus {
   status: string;
   count?: number;
@@ -21,24 +26,41 @@ interface UpdateResult {
 }
 
 export default function AdminPage() {
+  const [secret, setSecret] = useState("");
+  const [secretSaved, setSecretSaved] = useState(false);
   const [rankStatus, setRankStatus] = useState<RankingStatus | null>(null);
   const [updating, setUpdating] = useState(false);
   const [updateResult, setUpdateResult] = useState<UpdateResult | null>(null);
 
-  const loadStatus = () => {
-    fetch("/api/admin/update-rankings")
+  // Cargar secret guardado en sessionStorage al montar
+  useEffect(() => {
+    const saved = sessionStorage.getItem("admin_secret") ?? "";
+    if (saved) { setSecret(saved); setSecretSaved(true); }
+  }, []);
+
+  const saveSecret = () => {
+    sessionStorage.setItem("admin_secret", secret);
+    setSecretSaved(true);
+    loadStatus(secret);
+  };
+
+  const loadStatus = (s = secret) => {
+    fetch("/api/admin/update-rankings", { headers: adminHeaders(s) })
       .then((r) => r.json())
       .then(setRankStatus)
       .catch(() => {});
   };
 
-  useEffect(() => { loadStatus(); }, []);
+  useEffect(() => { if (secretSaved) loadStatus(); }, [secretSaved]);
 
   const handleUpdate = async () => {
     setUpdating(true);
     setUpdateResult(null);
     try {
-      const res = await fetch("/api/admin/update-rankings", { method: "POST" });
+      const res = await fetch("/api/admin/update-rankings", {
+        method: "POST",
+        headers: adminHeaders(secret),
+      });
       const data = await res.json() as UpdateResult;
       setUpdateResult(data);
       if (data.ok) loadStatus();
@@ -66,7 +88,35 @@ export default function AdminPage() {
 
       <div style={{ maxWidth: 720, margin: "0 auto", padding: "40px 24px" }}>
         <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 8, color: "#c8f135", letterSpacing: 2 }}>PANEL DE ADMINISTRACIÓN</h1>
-        <p style={{ color: "#4a6080", fontSize: 12, marginBottom: 40, letterSpacing: "0.1em" }}>Actualización de datos del sistema</p>
+        <p style={{ color: "#4a6080", fontSize: 12, marginBottom: 32, letterSpacing: "0.1em" }}>Actualización de datos del sistema</p>
+
+        {/* Auth secret */}
+        <div style={{ background: "#0d1318", border: "1px solid #1a2332", borderRadius: 12, padding: "16px 20px", marginBottom: 28, display: "flex", gap: 10, alignItems: "center" }}>
+          <span style={{ fontSize: 10, color: "#4a6080", letterSpacing: "0.15em", textTransform: "uppercase", whiteSpace: "nowrap" }}>Admin secret</span>
+          <input
+            type="password"
+            value={secret}
+            onChange={(e) => { setSecret(e.target.value); setSecretSaved(false); }}
+            onKeyDown={(e) => e.key === "Enter" && saveSecret()}
+            placeholder="ADMIN_SECRET"
+            style={{
+              flex: 1, background: "#080c10", border: "1px solid #1a2332", borderRadius: 6,
+              padding: "6px 10px", color: "white", fontFamily: "monospace", fontSize: 12, outline: "none",
+            }}
+          />
+          <button
+            onClick={saveSecret}
+            style={{
+              background: secretSaved ? "rgba(200,241,53,0.1)" : "#c8f135",
+              color: secretSaved ? "#c8f135" : "#080c10",
+              border: secretSaved ? "1px solid rgba(200,241,53,0.3)" : "none",
+              borderRadius: 6, padding: "6px 14px", fontSize: 11, fontWeight: 700,
+              cursor: "pointer", letterSpacing: "0.1em", whiteSpace: "nowrap",
+            }}
+          >
+            {secretSaved ? "✓ Guardado" : "Guardar"}
+          </button>
+        </div>
 
         {/* Rankings */}
         <div style={{ background: "#0d1318", border: "1px solid #1a2332", borderRadius: 16, padding: 24, marginBottom: 20 }}>

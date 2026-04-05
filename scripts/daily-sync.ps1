@@ -2,9 +2,15 @@
 # Ejecuta el pipeline diario de AllDataTennis y guarda el resultado en log.
 # Configurado para correr a las 06:00 AM via Windows Task Scheduler.
 
-$LogFile  = "$PSScriptRoot\daily-sync.log"
-$Endpoint = "http://localhost:3000/api/admin/daily-sync"
-$Stamp    = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+$LogFile     = "$PSScriptRoot\daily-sync.log"
+$Endpoint    = "http://localhost:3000/api/admin/daily-sync"
+$Stamp       = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+# Leer ADMIN_SECRET desde .env.local del proyecto
+$EnvFile     = Join-Path $PSScriptRoot "..\\.env.local"
+$AdminSecret = ""
+if (Test-Path $EnvFile) {
+    $AdminSecret = (Get-Content $EnvFile | Where-Object { $_ -match "^ADMIN_SECRET=" }) -replace "^ADMIN_SECRET=", ""
+}
 
 function Write-Log {
     param([string]$Message)
@@ -26,10 +32,13 @@ try {
 
 # Llamar al endpoint con timeout de 5 minutos (el sync puede tardar)
 try {
+    $headers = @{ "Content-Type" = "application/json" }
+    if ($AdminSecret) { $headers["Authorization"] = "Bearer $AdminSecret" }
+
     $response = Invoke-RestMethod `
         -Uri $Endpoint `
         -Method POST `
-        -ContentType "application/json" `
+        -Headers $headers `
         -TimeoutSec 300 `
         -ErrorAction Stop
 
