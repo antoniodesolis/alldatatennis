@@ -6,7 +6,8 @@
  * y genera insights estructurados para la generación de narrativa experta.
  */
 
-import { getPlayerProfile, buildGenericProfile, surfaceEdge, type TacticalProfile } from "./player-profiles";
+import { getPlayerProfile, buildGenericProfile, surfaceEdge, enrichProfileWithInsights, type TacticalProfile } from "./player-profiles";
+import { getPlayerInsights } from "../db/queries";
 import type { PlayerPatterns } from "./patterns";
 
 // ── Tipos de salida ───────────────────────────────────────
@@ -71,14 +72,24 @@ export function analyzeMatchup(
   const surf = conditions.surface.includes("clay") ? "clay"
     : conditions.surface.includes("grass") ? "grass" : "hard";
 
-  const p1Profile = getPlayerProfile(p1Slug) ?? buildGenericProfile(
+  const p1ProfileBase = getPlayerProfile(p1Slug) ?? buildGenericProfile(
     p1Slug, style1,
     surfFromStyle(style1, "clay"), surfFromStyle(style1, "hard"), surfFromStyle(style1, "grass"),
   );
-  const p2Profile = getPlayerProfile(p2Slug) ?? buildGenericProfile(
+  const p2ProfileBase = getPlayerProfile(p2Slug) ?? buildGenericProfile(
     p2Slug, style2,
     surfFromStyle(style2, "clay"), surfFromStyle(style2, "hard"), surfFromStyle(style2, "grass"),
   );
+
+  // Enriquecer con insights acumulados de partidos reales (con defensa ante errores de BD)
+  let p1Profile = p1ProfileBase;
+  let p2Profile = p2ProfileBase;
+  try {
+    const p1Insights = getPlayerInsights(p1Slug);
+    const p2Insights = getPlayerInsights(p2Slug);
+    p1Profile = enrichProfileWithInsights(p1ProfileBase, p1Insights);
+    p2Profile = enrichProfileWithInsights(p2ProfileBase, p2Insights);
+  } catch { /* insights no disponibles — usar perfiles base */ }
 
   // ── Armas vs debilidades ──────────────────────────────
 

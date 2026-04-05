@@ -866,6 +866,226 @@ const PROFILES: TacticalProfile[] = [
     tacticalNote: "Kazajo con buen forehand en desarrollo.",
     mentalNote: "Construyendo su perfil en el tour.",
   },
+  // ═══════════════ TOP 10-30 (faltantes) ══════════════════
+
+  {
+    slug: "ruud",
+    name: "Casper Ruud",
+    weapon: "forehand topspin en arcilla — velocidad de pelota y ángulos cruzados",
+    weakness: "saque — mucha presión sobre el segundo servicio y en hierba",
+    style: "aggressive-baseliner",
+    patterns: ["forehand rally", "topspin cross", "apertura de pista con forehand"],
+    clay: 10, hard: 7, grass: 5,
+    serving: 5, returning: 7, netGame: 5, speed: 7, fitness: 9,
+    pressure: "elevates", clutch: 8, comeback: 7,
+    flexibility: "medium",
+    tacticalNote: "El mejor especialista de arcilla del circuito junto a Nadal y Alcaraz. Su forehand topspin es devastador en tierra batida, construye puntos con paciencia y profundidad. En pista dura es sólido pero el saque lo limita. En hierba sufre notablemente.",
+    mentalNote: "Excelente mentalidad competitiva, finalista de Roland Garros y US Open. No se desmorona en los grandes momentos.",
+    homeVenues: ["Buenos Aires", "Santiago", "Bastad", "Gstaad"],
+  },
+  {
+    slug: "etcheverry",
+    name: "Tomás Etcheverry",
+    weapon: "forehand de alto topspin — devastador en arcilla con pelota alta y cruzada",
+    weakness: "pista rápida — el juego de fondo no tiene el mismo efecto, saque discreto",
+    style: "aggressive-baseliner",
+    patterns: ["topspin rally", "forehand inside-out", "pelota alta al backhand"],
+    clay: 9, hard: 6, grass: 4,
+    serving: 5, returning: 7, netGame: 4, speed: 7, fitness: 8,
+    pressure: "consistent", clutch: 6, comeback: 6,
+    flexibility: "low",
+    tacticalNote: "Especialista de arcilla argentino con uno de los forehand más pesados del circuito. El topspin extremo que genera hace muy difícil la defensa en tierra. En superficies rápidas pierde mucho por dependencia de la arcilla.",
+    mentalNote: "Sólido competidor en tierra, más irregular en otros contextos.",
+    homeVenues: ["Buenos Aires", "Rio de Janeiro"],
+  },
+  {
+    slug: "baez",
+    name: "Sebastián Báez",
+    weapon: "velocidad de piernas + forehand agresivo — defensor que se convierte en atacante",
+    weakness: "saque — uno de los saques más débiles del top 50, muy presionado",
+    style: "counter-puncher",
+    patterns: ["defensa activa", "cambio de ritmo", "subida tras defensa"],
+    clay: 9, hard: 6, grass: 4,
+    serving: 4, returning: 8, netGame: 5, speed: 9, fitness: 9,
+    pressure: "consistent", clutch: 7, comeback: 8,
+    flexibility: "medium",
+    tacticalNote: "Extraordinario atleta y corredor que convierte la defensa en ataque. Saca muy poco pero compensa con el return y los primeros pasos. Especialista de arcilla sudamericana. En superficies rápidas el saque es un handicap demasiado grande.",
+    mentalNote: "Muy aguerrido competitivamente. No se rinde aunque le vayan mal las cosas.",
+    homeVenues: ["Buenos Aires", "Rio de Janeiro", "Córdoba"],
+  },
+  {
+    slug: "griekspoor",
+    name: "Tallon Griekspoor",
+    weapon: "saque + forehand directo — juego rápido y agresivo en pista rápida",
+    weakness: "arcilla — sin las herramientas para construir puntos largos, backhand pasivo",
+    style: "aggressive-baseliner",
+    patterns: ["saque-forehand", "finish rápido en pista dura", "forehand inside-in"],
+    clay: 5, hard: 8, grass: 7,
+    serving: 8, returning: 6, netGame: 6, speed: 7, fitness: 7,
+    pressure: "consistent", clutch: 7, comeback: 6,
+    flexibility: "medium",
+    tacticalNote: "Neerlandés con uno de los saques más limpios del circuito. Su juego es directo y efectivo en pistas rápidas donde el saque corta el intercambio. No tiene paciencia para los peloteos de arcilla.",
+    mentalNote: "Buen nivel competitivo en sus condiciones ideales.",
+  },
+  {
+    slug: "michelsen",
+    name: "Alex Michelsen",
+    weapon: "saque potente + forehand plano — juego plano y rápido desde el fondo",
+    weakness: "arcilla — estilo plano no le favorece, falta experiencia en Grand Slams",
+    style: "aggressive-baseliner",
+    patterns: ["saque-forehand", "forehand directo", "punto corto"],
+    clay: 6, hard: 8, grass: 7,
+    serving: 8, returning: 6, netGame: 5, speed: 7, fitness: 7,
+    pressure: "inconsistent", clutch: 6, comeback: 5,
+    flexibility: "medium",
+    tacticalNote: "Joven americano con gran potencial ofensivo. Saque y forehand plano muy peligrosos en pista rápida. Está construyendo su juego en arcilla pero no es su superficie natural.",
+    mentalNote: "Todavía construyendo su perfil mental en los grandes momentos del tour.",
+  },
+  {
+    slug: "nakashima",
+    name: "Brandon Nakashima",
+    weapon: "backhand de dos manos preciso + movilidad defensiva",
+    weakness: "finalizar los puntos — tiende a los peloteos largos sin el golpe ganador definitivo",
+    style: "counter-puncher",
+    patterns: ["backhand rally", "defensa desde fondo", "cambio de ritmo"],
+    clay: 6, hard: 7, grass: 6,
+    serving: 6, returning: 7, netGame: 5, speed: 8, fitness: 8,
+    pressure: "consistent", clutch: 6, comeback: 7,
+    flexibility: "medium",
+    tacticalNote: "Americano con excelente defensa y backhand como arma principal. Su juego se basa en aguantar y contraatacar. Bastante equilibrado entre superficies pero sin arma ganadora clara.",
+    mentalNote: "Competitivo y fiable, aunque le falta el punch para cerrar partidos contra los mejores.",
+  },
+  {
+    slug: "van-de-zandschulp",
+    name: "Botic van de Zandschulp",
+    weapon: "forehand agresivo + saque — combinación directa en pista rápida",
+    weakness: "consistencia — alterna momentos brillantes con errores no forzados en exceso",
+    style: "aggressive-baseliner",
+    patterns: ["forehand agresivo", "saque-forehand", "juego directo"],
+    clay: 6, hard: 7, grass: 6,
+    serving: 7, returning: 6, netGame: 5, speed: 6, fitness: 7,
+    pressure: "inconsistent", clutch: 5, comeback: 5,
+    flexibility: "medium",
+    tacticalNote: "Neerlandés con talento ofensivo considerable pero muy irregular. Puede batir a cualquier top-10 un día y perder con el #80 al siguiente. Su forehand es peligroso pero la gestión del error voluntario es su gran asignatura pendiente.",
+    mentalNote: "Gran inconsistencia mental — cuando le sale el juego es brillante, cuando se le va es difícil de controlar.",
+  },
+
+  // ═══════════════ 30-80 ATP (faltantes) ═══════════════════
+
+  {
+    slug: "mannarino",
+    name: "Adrian Mannarino",
+    weapon: "slice de revés + variaciones — ritmo cambiante y juego de red inesperado",
+    weakness: "fuerza física — pierde intercambios de potencia contra golpeadores fuertes",
+    style: "all-court",
+    patterns: ["slice bajo", "subida a la red", "cambio de ritmo", "dejar corta + volea"],
+    clay: 6, hard: 7, grass: 8,
+    serving: 6, returning: 7, netGame: 7, speed: 7, fitness: 7,
+    pressure: "consistent", clutch: 7, comeback: 6,
+    flexibility: "high",
+    tacticalNote: "Francés atípico que rompe el ritmo con el slice de revés y subidas a la red cuando nadie lo espera. No tiene el saque ni el golpe ganador de los grandes pero su inteligencia táctica lo mantiene en el top-50 desde hace años. Favorito en hierba por el slice bajo.",
+    mentalNote: "Experimentado y sin complejos. Ha ganado a top-10 en días que nadie esperaba.",
+  },
+  {
+    slug: "moutet",
+    name: "Corentin Moutet",
+    weapon: "creatividad táctica + slice — juego muy variado e impredecible",
+    weakness: "potencia — pierde contra golpeadores que le saquen del ritmo con velocidad",
+    style: "all-court",
+    patterns: ["dejadas", "slice", "cambio de ritmo", "drop shot"],
+    clay: 7, hard: 6, grass: 6,
+    serving: 5, returning: 7, netGame: 6, speed: 7, fitness: 7,
+    pressure: "inconsistent", clutch: 5, comeback: 6,
+    flexibility: "high",
+    tacticalNote: "Francés muy creativo con enorme variedad de golpes. Usa la dejada y el slice con mucha frecuencia. Puede sorprender a cualquiera en días buenos pero la inconsistencia le pasa factura. Su juego irregular hace difícil mantener el nivel durante tres sets.",
+    mentalNote: "Muy irregular mentalmente — puede elevar o hundirse según el momento.",
+  },
+  {
+    slug: "altmaier",
+    name: "Daniel Altmaier",
+    weapon: "resistencia + forehand profundo — especialista de arcilla alemán",
+    weakness: "pista rápida — le falta potencia para terminar puntos cortos",
+    style: "counter-puncher",
+    patterns: ["peloteo profundo", "defensa activa", "forehand cruzado"],
+    clay: 8, hard: 5, grass: 5,
+    serving: 5, returning: 7, netGame: 4, speed: 7, fitness: 8,
+    pressure: "consistent", clutch: 6, comeback: 7,
+    flexibility: "low",
+    tacticalNote: "Alemán especialista de arcilla con gran capacidad para aguantar y desgastar. Su forehand profundo en arcilla hace daño pero carece de arma decisiva en superficies rápidas. En tierra batida puede sorprender a cualquiera.",
+    mentalNote: "Sólido mentalmente en arcilla, más frágil fuera de su superficie.",
+  },
+  {
+    slug: "molcan",
+    name: "Alex Molčan",
+    weapon: "backhand de dos manos + resistencia física — especialista de arcilla",
+    weakness: "saque y pista rápida — sin herramientas potentes fuera de la tierra",
+    style: "counter-puncher",
+    patterns: ["backhand cruzado", "peloteo fondo", "defensa tenaz"],
+    clay: 8, hard: 5, grass: 4,
+    serving: 5, returning: 7, netGame: 4, speed: 7, fitness: 8,
+    pressure: "inconsistent", clutch: 5, comeback: 6,
+    flexibility: "low",
+    tacticalNote: "Eslovaco con juego de fondo sólido en arcilla. El backhand es su herramienta principal. Sin las condiciones de arcilla lentas es un jugador claramente inferior.",
+    mentalNote: "Nivel mental inconsistente — sus resultados son muy variables.",
+  },
+  {
+    slug: "diaz-acosta",
+    name: "Facundo Díaz Acosta",
+    weapon: "forehand pesado + pelota alta — especialista de arcilla sudamericana",
+    weakness: "pista rápida — sin experiencia suficiente y estilo no adaptado",
+    style: "aggressive-baseliner",
+    patterns: ["topspin forehand", "pelota alta", "rally cruzado"],
+    clay: 8, hard: 5, grass: 4,
+    serving: 5, returning: 7, netGame: 4, speed: 8, fitness: 8,
+    pressure: "inconsistent", clutch: 5, comeback: 6,
+    flexibility: "low",
+    tacticalNote: "Joven argentino con forehand muy pesado en arcilla. Emergente especialista de tierra batida sudamericana. Fuera de arcilla sus resultados son muy limitados.",
+    mentalNote: "En desarrollo — datos insuficientes para evaluar su nivel mental.",
+  },
+  {
+    slug: "navone",
+    name: "Mariano Navone",
+    weapon: "forehand pesado + resistencia — especialista de arcilla sudamericana emergente",
+    weakness: "pista rápida — dependencia total de la arcilla para su estilo",
+    style: "aggressive-baseliner",
+    patterns: ["forehand topspin", "rally fondo", "punto largo"],
+    clay: 8, hard: 5, grass: 4,
+    serving: 5, returning: 7, netGame: 4, speed: 8, fitness: 8,
+    pressure: "consistent", clutch: 6, comeback: 6,
+    flexibility: "low",
+    tacticalNote: "Argentino con ascenso meteórico en arcilla. Juego de fondo agresivo y resistente. La arcilla es su elemento natural y ahí es muy difícil de batir. En superficies rápidas es un jugador diferente.",
+    mentalNote: "Buena actitud competitiva, todavía probando su nivel en grandes partidos.",
+    homeVenues: ["Buenos Aires", "Rio de Janeiro", "Madrid"],
+  },
+  {
+    slug: "vukic",
+    name: "Aleksandar Vukic",
+    weapon: "juego agresivo desde el fondo + saque sólido",
+    weakness: "partidos largos — pierde potencia y concentración en sets 2-3",
+    style: "aggressive-baseliner",
+    patterns: ["saque-forehand", "forehand agresivo", "punto corto"],
+    clay: 6, hard: 7, grass: 6,
+    serving: 7, returning: 6, netGame: 5, speed: 7, fitness: 6,
+    pressure: "inconsistent", clutch: 5, comeback: 5,
+    flexibility: "medium",
+    tacticalNote: "Australiano con juego directo y agresivo. Mejor en superficies rápidas donde puede terminar puntos. No tiene la resistencia para los partidos de arcilla muy largos.",
+    mentalNote: "Inconsistente en los grandes momentos.",
+  },
+  {
+    slug: "tien",
+    name: "Learner Tien",
+    weapon: "saque potente + forehand plano — joven agresivo en pista rápida",
+    weakness: "experiencia y arcilla — estilo en desarrollo, muy nueva en el tour",
+    style: "aggressive-baseliner",
+    patterns: ["saque-forehand", "punto corto agresivo"],
+    clay: 5, hard: 7, grass: 7,
+    serving: 8, returning: 5, netGame: 5, speed: 7, fitness: 7,
+    pressure: "inconsistent", clutch: 5, comeback: 5,
+    flexibility: "medium",
+    tacticalNote: "Joven americano con grandes condiciones físicas y saque potente. Está en fase de construcción en el tour pero su techo es alto en superficies rápidas.",
+    mentalNote: "Todavía sin historial suficiente para evaluar su perfil en grandes momentos.",
+  },
+
   {
     slug: "merida-aguilar",
     name: "Daniel Mérida",
@@ -947,6 +1167,66 @@ export function surfaceName(surface: string): string {
   if (surface.includes("grass")) return "hierba";
   if (surface.includes("indoor")) return "pista dura indoor";
   return "pista dura";
+}
+
+/**
+ * Enriquece un perfil táctico con insights dinámicos acumulados de partidos reales.
+ * Los insights no sobreescriben el perfil estático — lo complementan añadiendo
+ * observaciones recientes al tacticalNote y mentalNote.
+ */
+export function enrichProfileWithInsights(
+  profile: TacticalProfile,
+  insights: {
+    matchPatterns: { dominio: number; batalla: number; irregular: number; remontada: number };
+    tacticalObservations: string[];
+    weaponsConfirmed: string[];
+    weaknessesConfirmed: string[];
+    mentalObservations: string[];
+    matchCount: number;
+  } | null,
+): TacticalProfile {
+  if (!insights || insights.matchCount === 0) return profile;
+
+  const enriched = { ...profile };
+
+  // Añadir patrones confirmados si son nuevos
+  if (insights.weaponsConfirmed.length > 0) {
+    const confirmed = insights.weaponsConfirmed[0];
+    if (confirmed && !profile.weapon.toLowerCase().includes(confirmed.toLowerCase().slice(0, 8))) {
+      enriched.weapon2 = confirmed;
+    }
+  }
+  if (insights.weaknessesConfirmed.length > 0 && !profile.weakness2) {
+    enriched.weakness2 = insights.weaknessesConfirmed[0];
+  }
+
+  // Enriquecer tactical note con observaciones recientes
+  const recentObs = insights.tacticalObservations.slice(0, 3).filter(Boolean);
+  if (recentObs.length > 0) {
+    const obsText = recentObs.join(". ");
+    enriched.tacticalNote = `${profile.tacticalNote} | Observaciones recientes (${insights.matchCount} partidos): ${obsText}`;
+  }
+
+  // Enriquecer mental note con datos reales de patrón
+  const { dominio, batalla, irregular, remontada } = insights.matchPatterns;
+  const total = dominio + batalla + irregular + remontada;
+  if (total >= 5) {
+    const pctDominio   = Math.round((dominio / total) * 100);
+    const pctBatalla   = Math.round((batalla / total) * 100);
+    const pctRemontada = Math.round((remontada / total) * 100);
+    const patternSummary = [
+      pctDominio   >= 30 ? `gana por dominio (${pctDominio}%)` : null,
+      pctBatalla   >= 30 ? `muy regular en batallas (${pctBatalla}%)` : null,
+      pctRemontada >= 20 ? `alta capacidad de remontada (${pctRemontada}%)` : null,
+    ].filter(Boolean).join(", ");
+
+    if (patternSummary) {
+      const mentalExtra = insights.mentalObservations[0] ?? "";
+      enriched.mentalNote = `${profile.mentalNote}${mentalExtra ? " " + mentalExtra : ""} | Patrón real: ${patternSummary}.`;
+    }
+  }
+
+  return enriched;
 }
 
 /**

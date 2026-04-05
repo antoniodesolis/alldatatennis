@@ -89,6 +89,47 @@ export function runMigrations() {
     );
   `);
 
+  // ── Enriquecimiento post-partido ─────────────────────────
+  db.exec(`
+    -- Crónicas e insights por partido
+    CREATE TABLE IF NOT EXISTS match_insights (
+      te_match_id     TEXT PRIMARY KEY,
+      match_date      TEXT NOT NULL,
+      winner_slug     TEXT NOT NULL,
+      loser_slug      TEXT NOT NULL,
+      tournament      TEXT,
+      surface         TEXT,
+      score           TEXT,
+      match_pattern   TEXT,          -- dominio|batalla|irregular|remontada|walkover
+      chronicle_url   TEXT,          -- URL de la crónica (null si solo marcador)
+      chronicle_src   TEXT,          -- dominio fuente
+      insights_json   TEXT,          -- MatchInsights serializado
+      enriched_at     INTEGER DEFAULT (unixepoch())
+    );
+
+    -- Insights acumulados por jugador (actualizados con cada partido)
+    CREATE TABLE IF NOT EXISTS player_insights (
+      te_slug         TEXT PRIMARY KEY,
+      insights_json   TEXT NOT NULL DEFAULT '{}',
+      match_count     INTEGER DEFAULT 0,
+      updated_at      INTEGER DEFAULT (unixepoch())
+    );
+  `);
+
+  // ── Rankings ATP persistidos ─────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS atp_rankings (
+      rank        INTEGER NOT NULL,
+      atp_code    TEXT NOT NULL,
+      name        TEXT NOT NULL,
+      country     TEXT,
+      points      TEXT DEFAULT '',
+      updated_at  INTEGER NOT NULL DEFAULT (unixepoch()),
+      PRIMARY KEY (rank, updated_at)
+    );
+    CREATE INDEX IF NOT EXISTS idx_rankings_updated ON atp_rankings(updated_at DESC);
+  `);
+
   // Migraciones aditivas — ADD COLUMN falla si ya existe, lo ignoramos
   const addCols = [
     "ALTER TABLE player_match_stats ADD COLUMN match_time        TEXT",

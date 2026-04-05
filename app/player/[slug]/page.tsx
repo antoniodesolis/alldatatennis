@@ -9,8 +9,14 @@ import type { CourtProfile } from "../../../lib/analytics/court-speed";
 
 // ── Utils ─────────────────────────────────────────────────
 
+/** Strip TE hash suffix (e.g. "-d58ed") before displaying or fetching */
+function canonicalizeSlug(slug: string): string {
+  return slug.replace(/-[0-9a-f]{5}$/i, "");
+}
+
 function formatName(slug: string): string {
-  return slug.split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+  // Strip hash suffix before formatting for display
+  return canonicalizeSlug(slug).split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 }
 
 function initialsPlaceholder(name: string): string {
@@ -116,7 +122,9 @@ type Tab = typeof TABS[number];
 
 export default function PlayerPage() {
   const params = useParams();
-  const slug = params.slug as string;
+  const rawSlug = params.slug as string;
+  // Strip TE hash suffix (e.g. "griekspoor-d58ed" → "griekspoor")
+  const slug = canonicalizeSlug(rawSlug);
   const displayName = formatName(slug);
 
   const [photo, setPhoto]     = useState<string>("");

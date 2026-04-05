@@ -35,6 +35,21 @@ function initialsPlaceholder(name: string): string {
 }
 
 // Extrae apellido de "Alcaraz C." o "Carlos Alcaraz"
+/** Calcula el resultado de la predicción para un partido finalizado */
+function predictionOutcome(
+  m: ATPMatch,
+  pred: PredictionResult,
+): "correct" | "wrong" | "close" | null {
+  if (!m.winner || m.status !== "finished") return null;
+  const p1Pct = pred.player1.winPct;
+  const p2Pct = pred.player2.winPct;
+  const maxPct = Math.max(p1Pct, p2Pct);
+  // Margen ≤54%: demasiado igualado para juzgar
+  if (maxPct <= 54) return "close";
+  const predictedWinner = p1Pct >= p2Pct ? "player1" : "player2";
+  return predictedWinner === m.winner ? "correct" : "wrong";
+}
+
 function lastName(name: string): string {
   const parts = name.trim().split(/\s+/);
   // Si el último token es una inicial (1-2 chars con punto), el apellido es el primero
@@ -104,6 +119,8 @@ export default function Home() {
   const [matchesLoading, setMatchesLoading] = useState(true);
   // Map: lastName(lower) → photo URL — construido desde el ranking top 100
   const [rankingMap, setRankingMap] = useState<Map<string, string>>(new Map());
+  // Map: lastName(lower) → rank number
+  const [rankNumMap, setRankNumMap] = useState<Map<string, number>>(new Map());
 
   // Calendario de días
   const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
@@ -138,6 +155,7 @@ export default function Home() {
           tournament: m.tournament,
           tourneyLevel: inferTourneyLevel(m.tournament),
           surface: m.surface ?? "hard",
+          round: m.round || undefined,
           timeOfDay: undefined,
           date: selectedDate,
         }),
@@ -145,8 +163,13 @@ export default function Home() {
       if (res.ok) {
         const data = await res.json() as PredictionResult;
         setPredictions((prev) => ({ ...prev, [m.id]: data }));
+      } else {
+        const errData = await res.json().catch(() => ({})) as { detail?: string };
+        console.error("[prediction] API error:", res.status, errData.detail ?? "");
       }
-    } catch { /* ignore */ } finally {
+    } catch (e) {
+      console.error("[prediction] fetch error:", e);
+    } finally {
       setLoadingPred((prev) => ({ ...prev, [m.id]: false }));
     }
   }, [predictions, loadingPred, selectedDate]);
@@ -159,13 +182,15 @@ export default function Home() {
 
   const buildRankingMap = useCallback((ps: ATPPlayer[]) => {
     const m = new Map<string, string>();
+    const rn = new Map<string, number>();
     for (const p of ps) {
-      // Nombre puede ser "Jannik Sinner" o "Carlos Alcaraz"
       const parts = p.name.trim().split(/\s+/);
       const last = parts[parts.length - 1].toLowerCase();
       m.set(last, p.photo);
+      rn.set(last, p.rank);
     }
     setRankingMap(m);
+    setRankNumMap(rn);
   }, []);
 
   // Cargar rankings una sola vez
@@ -186,6 +211,7 @@ export default function Home() {
   useEffect(() => {
     setMatchesLoading(true);
     setMatches([]);
+    setPredictions({});
     setExpandedMatch(null);
     const dateQ = selectedDate !== todayStr ? `?date=${selectedDate}` : "";
     fetch(`/api/matches${dateQ}`)
@@ -197,6 +223,24 @@ export default function Home() {
       .catch(() => setMatches([]))
       .finally(() => setMatchesLoading(false));
   }, [selectedDate, todayStr]);
+
+  // Auto-fetch predicciones para partidos terminados (para mostrar acierto/fallo sin expandir)
+  useEffect(() => {
+    const finished = matches.filter((m) => m.status === "finished" && m.winner);
+    if (finished.length === 0) return;
+    // Fetch secuencial con pequeño delay para no saturar el servidor
+    let cancelled = false;
+    (async () => {
+      for (const m of finished) {
+        if (cancelled) break;
+        if (predictions[m.id] || loadingPred[m.id]) continue;
+        await fetchPrediction(m);
+        await new Promise((r) => setTimeout(r, 150));
+      }
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matches]);
 
   const scroll = (dir: "left" | "right") => {
     if (!carouselRef.current) return;
@@ -238,9 +282,18 @@ export default function Home() {
         .scroll-btn{width:36px;height:36px;border-radius:50%;background:var(--bg2);border:1px solid var(--border);color:white;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all 0.2s;flex-shrink:0;}
         .scroll-btn:hover{border-color:var(--acid);color:var(--acid);}
 
-        .match-card{background:var(--bg2);border:1px solid var(--border);border-radius:16px;transition:all 0.3s;overflow:hidden;cursor:pointer;}
+        .match-card{background:var(--bg2);border:1px solid var(--border);border-radius:16px;transition:all 0.3s;overflow:hidden;cursor:pointer;position:relative;}
         .match-card:hover{border-color:rgba(200,241,53,0.25);box-shadow:0 8px 40px rgba(0,0,0,0.5);}
         .match-card.expanded{border-color:rgba(200,241,53,0.4);}
+        .match-card.outcome-correct{border-color:rgba(72,199,116,0.45);background:linear-gradient(135deg,rgba(72,199,116,0.06) 0%,var(--bg2) 60%);}
+        .match-card.outcome-correct:hover{border-color:rgba(72,199,116,0.7);}
+        .match-card.outcome-wrong{border-color:rgba(255,96,96,0.4);background:linear-gradient(135deg,rgba(255,96,96,0.05) 0%,var(--bg2) 60%);}
+        .match-card.outcome-wrong:hover{border-color:rgba(255,96,96,0.65);}
+        .match-card.outcome-close{border-color:rgba(255,255,255,0.12);}
+        .outcome-dot{position:absolute;top:12px;right:12px;width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+        .outcome-dot.correct{background:#48c774;box-shadow:0 0 8px rgba(72,199,116,0.6);}
+        .outcome-dot.wrong{background:#ff6060;box-shadow:0 0 8px rgba(255,96,96,0.5);}
+        .outcome-dot.close{background:rgba(255,255,255,0.2);}
         .pred-panel{background:var(--bg3);border-top:1px solid var(--border);padding:20px 24px;}
         .prob-bar-wrap{display:flex;align-items:center;gap:0;border-radius:8px;overflow:hidden;height:36px;}
         .prob-bar-p1{background:linear-gradient(90deg,var(--acid),#9ab82a);display:flex;align-items:center;justify-content:flex-start;padding:0 12px;transition:width 0.6s ease;}
@@ -303,6 +356,7 @@ export default function Home() {
             {["Partidos", "Jugadores", "Torneos", "Análisis"].map((l) => (
               <a key={l} href="#" className="nav-link">{l}</a>
             ))}
+            <a href="/historico" className="nav-link">Histórico</a>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: "var(--acid)" }} />
@@ -434,13 +488,23 @@ export default function Home() {
                 const isExpanded = expandedMatch === m.id;
                 const pred = predictions[m.id];
                 const isLoadingPred = loadingPred[m.id];
+                const outcome = isFinished && pred ? predictionOutcome(m, pred) : null;
+                const outcomeClass = outcome ? ` outcome-${outcome}` : "";
 
                 return (
                   <div
                     key={m.id}
-                    className={`match-card${isExpanded ? " expanded" : ""}`}
-                    style={{ opacity: isFinished ? 0.75 : 1 }}
+                    className={`match-card${isExpanded ? " expanded" : ""}${outcomeClass}`}
+                    style={{ opacity: isFinished && !outcome ? 0.75 : isFinished ? 0.88 : 1 }}
                   >
+                    {/* Indicador de acierto/fallo */}
+                    {outcome && (
+                      <div
+                        className={`outcome-dot ${outcome}`}
+                        title={outcome === "correct" ? "Predicción correcta" : outcome === "wrong" ? "Predicción fallida" : "Muy igualado"}
+                      />
+                    )}
+
                     {/* Fila principal — clickable */}
                     <div
                       className="p-5 flex flex-wrap items-center gap-4"
@@ -462,27 +526,51 @@ export default function Home() {
                       <a href={`/player/${m.player1Slug}`} onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit", minWidth: 0 }}>
                         <PlayerPhoto name={m.player1} slug={m.player1Slug} rankingMap={rankingMap} size={52}
                           style={{ opacity: isFinished && m.winner === "player2" ? 0.45 : 1 }} />
-                        <div className="fb font-semibold text-base leading-tight"
-                          style={{ color: isFinished && m.winner === "player1" ? "var(--acid)" : isFinished && m.winner === "player2" ? "rgba(255,255,255,0.35)" : "white" }}>
-                          {m.player1}
-                          {isFinished && m.winner === "player1" && <span className="fm text-[9px] ml-1.5" style={{ color: "var(--acid)" }}>✓</span>}
+                        <div style={{ minWidth: 0 }}>
+                          <div className="fb font-semibold text-base leading-tight"
+                            style={{ color: isFinished && m.winner === "player1" ? "var(--acid)" : isFinished && m.winner === "player2" ? "rgba(255,255,255,0.35)" : "white" }}>
+                            {m.player1}
+                            {isFinished && m.winner === "player1" && <span className="fm text-[9px] ml-1.5" style={{ color: "var(--acid)" }}>✓</span>}
+                          </div>
+                          {rankNumMap.get(lastName(m.player1)) && (
+                            <div className="fm text-[10px]" style={{ color: "var(--muted)", marginTop: 1 }}>
+                              ATP <span style={{ color: "rgba(255,255,255,0.45)" }}>#{rankNumMap.get(lastName(m.player1))}</span>
+                            </div>
+                          )}
                         </div>
                       </a>
                       <div className="fm text-[10px]" style={{ color: "var(--muted)", flexShrink: 0 }}>VS</div>
                       <a href={`/player/${m.player2Slug}`} onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit", minWidth: 0 }}>
                         <PlayerPhoto name={m.player2} slug={m.player2Slug} rankingMap={rankingMap} size={52}
                           style={{ opacity: isFinished && m.winner === "player1" ? 0.45 : isFinished ? 1 : 0.75 }} />
-                        <div className="fb font-semibold text-base leading-tight"
-                          style={{ color: isFinished && m.winner === "player2" ? "var(--acid)" : isFinished && m.winner === "player1" ? "rgba(255,255,255,0.35)" : "rgba(255,255,255,0.6)" }}>
-                          {m.player2}
-                          {isFinished && m.winner === "player2" && <span className="fm text-[9px] ml-1.5" style={{ color: "var(--acid)" }}>✓</span>}
+                        <div style={{ minWidth: 0 }}>
+                          <div className="fb font-semibold text-base leading-tight"
+                            style={{ color: isFinished && m.winner === "player2" ? "var(--acid)" : isFinished && m.winner === "player1" ? "rgba(255,255,255,0.35)" : "rgba(255,255,255,0.6)" }}>
+                            {m.player2}
+                            {isFinished && m.winner === "player2" && <span className="fm text-[9px] ml-1.5" style={{ color: "var(--acid)" }}>✓</span>}
+                          </div>
+                          {rankNumMap.get(lastName(m.player2)) && (
+                            <div className="fm text-[10px]" style={{ color: "var(--muted)", marginTop: 1 }}>
+                              ATP <span style={{ color: "rgba(255,255,255,0.45)" }}>#{rankNumMap.get(lastName(m.player2))}</span>
+                            </div>
+                          )}
                         </div>
                       </a>
 
                       {/* Torneo + ronda + superficie */}
                       <div className="flex flex-wrap gap-2 items-center ml-auto">
                         <span className="tag tag-g">{m.tournament}</span>
-                        {m.round && <span className="tag tag-g">{m.round}</span>}
+                        {m.round && (() => {
+                          const isQual = /^Q\d?$/i.test(m.round);
+                          return (
+                            <span className="tag" style={isQual
+                              ? { background: "rgba(255,180,0,0.08)", color: "#f5a623", borderColor: "rgba(255,180,0,0.2)" }
+                              : { background: "rgba(255,255,255,0.05)", color: "var(--muted)", borderColor: "rgba(255,255,255,0.07)" }
+                            }>
+                              {isQual ? "Q" : m.round}
+                            </span>
+                          );
+                        })()}
                         <span className="tag" style={{ background: `${surfColor}22`, color: surfColor, borderColor: `${surfColor}44` }}>{surfLabel}</span>
                         <span className="fm text-[9px]" style={{ color: "var(--muted)" }}>{isExpanded ? "▲" : "▼"}</span>
                       </div>

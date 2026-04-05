@@ -1,20 +1,21 @@
 /**
  * Motor de predicción ATP v2 — lib/prediction/engine.ts
  *
- * 10 factores ponderados con redistribución dinámica de pesos cuando
+ * 11 factores ponderados con redistribución dinámica de pesos cuando
  * un factor no tiene datos suficientes (< MIN_MATCHES_FACTOR partidos).
  *
  * Pesos base (deben sumar 1.0):
- *   1. CSI exacto del torneo       20%
- *   2. Forma reciente 3 meses      15%
- *   3. Win rate vs ranking rival   15%
- *   4. Historial torneo específico 10%
- *   5. H2H en superficie           10%
- *   6. Nivel de torneo             10%
- *   7. Turno día/noche              5%
- *   8. Clima                        5%
- *   9. TB + 3er set (si igualado)   5%
- *  10. Días de descanso             5%
+ *   1. CSI exacto del torneo        17%
+ *   2. Forma reciente 3 meses       14%
+ *   3. Win rate vs ranking rival    14%
+ *   4. Historial torneo específico   9%
+ *   5. H2H en superficie             9%
+ *   6. Nivel de torneo               9%
+ *   7. Turno día/noche               5%
+ *   8. Clima                         5%
+ *   9. TB + 3er set (si igualado)    5%
+ *  10. Días de descanso              5%
+ *  11. Perfil táctico del matchup    8%
  *
  * Probabilidad final: logistic( Σ effectiveWeight_i × rawAdv_i × LOGIT_SCALE )
  */
@@ -29,24 +30,26 @@ import type { PlayerConfidence } from "../analytics/player-confidence";
 import { analyzeMatchup } from "../analytics/matchup-intelligence";
 import { generateNarrative } from "../analytics/narrative";
 import type { TacticalAnalysis } from "../analytics/narrative";
+import { getPlayerInsights } from "../db/queries";
 
 // ── Constants ─────────────────────────────────────────────
 
-const LOGIT_SCALE     = 4.5;  // amplificador de ventajas en el espacio logit
+const LOGIT_SCALE     = 6.5;  // amplificador de ventajas en el espacio logit
 const MIN_MATCHES_FACTOR = 5; // mínimo de partidos para considerar que un factor tiene datos
-const WIN_RATE_NORM   = 0.4;  // 40pp diferencia = ventaja máxima en factores de win rate
+const WIN_RATE_NORM   = 0.30; // 30pp diferencia = ventaja máxima en factores de win rate
 
 const BASE_WEIGHTS: Record<string, number> = {
-  csi_exact:       0.20,
-  recent_form_3m:  0.15,
-  vs_rank:         0.15,
-  tourney_history: 0.10,
-  h2h_surface:     0.10,
-  level:           0.10,
-  time_of_day:     0.05,
-  weather:         0.05,
-  tiebreak_3rdset: 0.05,
-  rest_days:       0.05,
+  csi_exact:        0.17,
+  recent_form_3m:   0.14,
+  vs_rank:          0.14,
+  tourney_history:  0.09,
+  h2h_surface:      0.09,
+  level:            0.09,
+  time_of_day:      0.05,
+  weather:          0.05,
+  tiebreak_3rdset:  0.05,
+  rest_days:        0.05,
+  tactical_profile: 0.08,
 };
 
 // ── Types ────────────────────────────────────────────────
@@ -59,6 +62,7 @@ export interface PredictionInput {
   tournament: string;
   tourneyLevel: string;   // "grand-slam"|"masters-1000"|"atp-500"|"atp-250"|"atp-finals"|"other"
   surface: string;        // "clay"|"hard"|"grass"|"indoor hard"
+  round?: string;         // "R128"|"R64"|"R32"|"R16"|"QF"|"SF"|"F"|"Q"|"Q1"|"Q2"|"RR"
   timeOfDay?: string;     // "day"|"evening"|"night"
   date?: string;          // YYYY-MM-DD
   lat?: number;
@@ -281,6 +285,20 @@ function getLastMatchDate(slug: string, beforeDate: string): string | null {
   return row?.last ?? null;
 }
 
+/** Calcula la racha actual desde recentForm (["W","W","L",...]).
+ *  Positivo = racha ganadora, negativo = racha perdedora. */
+function computeCurrentStreak(recentForm: string[] | undefined): number {
+  if (!recentForm || recentForm.length === 0) return 0;
+  const first = recentForm[0];
+  if (first !== "W" && first !== "L") return 0;
+  let count = 0;
+  for (const r of recentForm) {
+    if (r === first) count++;
+    else break;
+  }
+  return first === "W" ? count : -count;
+}
+
 function restDaysScore(daysRest: number | null): number {
   if (daysRest == null) return 0.50; // sin datos → neutral
   if (daysRest === 0) return 0.30;   // jugó hoy → muy cansado
@@ -461,6 +479,18 @@ function redistributeWeights(
   return result;
 }
 
+// ── Player name helpers ───────────────────────────────────
+
+/** Extrae el apellido manejando "Carlos Alcaraz" → "Alcaraz" y "Marozsan F." → "Marozsan" */
+function playerLastName(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0];
+  const last = parts[parts.length - 1];
+  // Si el último token es una inicial (letra mayúscula + punto opcional), usar el primero
+  if (/^[A-Z]\.?$/.test(last)) return parts[0];
+  return last;
+}
+
 // ── Main explanation generator ────────────────────────────
 
 function buildMainReason(
@@ -469,8 +499,8 @@ function buildMainReason(
   p2Name: string,
   winPct1: number,
 ): string {
-  const p1Last = p1Name.split(" ").pop()!;
-  const p2Last = p2Name.split(" ").pop()!;
+  const p1Last = playerLastName(p1Name);
+  const p2Last = playerLastName(p2Name);
 
   // Top 2 factores favorables al favorito
   const favored = winPct1 >= 50 ? "p1" : "p2";
@@ -490,7 +520,10 @@ function buildMainReason(
   const pct = winPct1 >= 50 ? winPct1 : 100 - winPct1;
   const dominance = pct >= 75 ? "gran favorito" : pct >= 65 ? "claro favorito" : "ligero favorito";
 
-  const reasons = topFavorable.map((f) => f.explanation.toLowerCase());
+  const reasons = topFavorable.map((f) => {
+    const e = f.explanation;
+    return e.charAt(0).toLowerCase() + e.slice(1);
+  });
 
   if (reasons.length === 1) {
     return `${favoredName} es ${dominance} (${pct}%) principalmente por ${reasons[0]}.`;
@@ -554,7 +587,24 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
   const conf1 = computePlayerConfidence(p1);
   const conf2 = computePlayerConfidence(p2);
 
-  // ── 6. Construir los 10 factores ──────────────────────────
+  // ── 5c. Análisis de matchup (necesario para factor táctico) ─
+  let matchupEarly: ReturnType<typeof analyzeMatchup>;
+  try {
+    matchupEarly = analyzeMatchup(p1, p2, pat1, pat2, {
+      surface: input.surface,
+      tourneyLevel: input.tourneyLevel,
+      tournament: input.tournament,
+      weather: weather ? { temp: weather.temp, windSpeed: weather.windSpeed, humidity: weather.humidity, effect: weather.effect } : undefined,
+      p1RankEstimated,
+      p2RankEstimated,
+      isIndoor: input.indoor,
+    });
+  } catch (e) {
+    console.warn("[engine] analyzeMatchup early error:", (e as Error).message);
+    matchupEarly = analyzeMatchup(p1, p2, pat1, pat2, { surface: input.surface, tourneyLevel: input.tourneyLevel, tournament: input.tournament });
+  }
+
+  // ── 6. Construir los 11 factores ──────────────────────────
 
   const rawFactors: Array<Omit<FactorResult, "baseWeight" | "effectiveWeight">> = [];
 
@@ -591,7 +641,7 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
     const dataCount = Math.min(p1Matches, p2Matches);
     const hasData = (p1Rate != null || p2Rate != null) && (p1Matches >= MIN_MATCHES_FACTOR || p2Matches >= MIN_MATCHES_FACTOR);
     const rawAdv = rateToAdv(p1Rate, p2Rate);
-    const favored = rawAdv > 0.05 ? input.player1Name.split(" ").pop()! : rawAdv < -0.05 ? input.player2Name.split(" ").pop()! : null;
+    const favored = rawAdv > 0.05 ? playerLastName(input.player1Name) : rawAdv < -0.05 ? playerLastName(input.player2Name) : null;
     const csiLabel = courtModel ? `CSI ${courtSpeed} (${courtModel.court_profile})` : "pista";
     const explanation = favored
       ? `mejor rendimiento de ${favored} en pistas de velocidad ${csiLabel} (${pctStr(rawAdv > 0 ? p1Rate : p2Rate)} vs ${pctStr(rawAdv > 0 ? p2Rate : p1Rate)})`
@@ -612,7 +662,7 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
     const r1 = form1.winRate, r2 = form2.winRate;
     const hasData = (form1.matches >= MIN_MATCHES_FACTOR || form2.matches >= MIN_MATCHES_FACTOR);
     const rawAdv = rateToAdv(r1, r2);
-    const favored = rawAdv > 0.05 ? input.player1Name.split(" ").pop()! : rawAdv < -0.05 ? input.player2Name.split(" ").pop()! : null;
+    const favored = rawAdv > 0.05 ? playerLastName(input.player1Name) : rawAdv < -0.05 ? playerLastName(input.player2Name) : null;
     const explanation = favored
       ? `mejor forma reciente de ${favored} en los últimos 3 meses (${pctStr(rawAdv > 0 ? r1 : r2)})`
       : `forma reciente similar en los últimos 3 meses`;
@@ -677,7 +727,7 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
     const rawAdv = rateToAdv(p1Rate, p2Rate);
     const p2RankLabel = p2RankEstimated ? `#${p2RankEstimated} (${p2Bracket})` : p2Bracket;
     const p1RankLabel = p1RankEstimated ? `#${p1RankEstimated} (${p1Bracket})` : p1Bracket;
-    const favored = rawAdv > 0.05 ? input.player1Name.split(" ").pop()! : rawAdv < -0.05 ? input.player2Name.split(" ").pop()! : null;
+    const favored = rawAdv > 0.05 ? playerLastName(input.player1Name) : rawAdv < -0.05 ? playerLastName(input.player2Name) : null;
     const explanation = favored
       ? sourceLabel === "bracket"
         ? `${favored} tiene mejor historial contra rivales de su nivel — ${pctStr(rawAdv > 0 ? p1Rate : p2Rate)} vs ${p2Bracket}`
@@ -704,7 +754,7 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
     const p2M = t2?.split.matches ?? 0;
     const hasData = (p1M >= MIN_MATCHES_FACTOR || p2M >= MIN_MATCHES_FACTOR);
     const rawAdv = rateToAdv(p1Rate, p2Rate);
-    const favored = rawAdv > 0.05 ? input.player1Name.split(" ").pop()! : rawAdv < -0.05 ? input.player2Name.split(" ").pop()! : null;
+    const favored = rawAdv > 0.05 ? playerLastName(input.player1Name) : rawAdv < -0.05 ? playerLastName(input.player2Name) : null;
     const explanation = favored
       ? `historial superior de ${favored} en ${input.tournament} (${pctStr(rawAdv > 0 ? p1Rate : p2Rate)} en ${rawAdv > 0 ? p1M : p2M} partidos)`
       : `historial similar en ${input.tournament}`;
@@ -726,7 +776,7 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
     const p1WinRate = h2hSurf.total > 0 ? h2hSurf.p1Wins / h2hSurf.total : null;
     const rawAdv = p1WinRate != null ? clamp((p1WinRate - 0.5) * 2, -1, 1) : 0;
     const surfLabel = input.surface === "clay" ? "tierra" : input.surface === "grass" ? "hierba" : "pista dura";
-    const favored = rawAdv > 0.05 ? input.player1Name.split(" ").pop()! : rawAdv < -0.05 ? input.player2Name.split(" ").pop()! : null;
+    const favored = rawAdv > 0.05 ? playerLastName(input.player1Name) : rawAdv < -0.05 ? playerLastName(input.player2Name) : null;
     const explanation = favored
       ? `${favored} gana el H2H en ${surfLabel} (${h2hSurf.p1Wins > h2hSurf.p2Wins ? h2hSurf.p1Wins : h2hSurf.p2Wins}-${h2hSurf.p1Wins > h2hSurf.p2Wins ? h2hSurf.p2Wins : h2hSurf.p1Wins} en ${h2hSurf.total} duelos)`
       : h2hSurf.total > 0 ? `H2H igualado en ${surfLabel} (${h2hSurf.p1Wins}-${h2hSurf.p2Wins})`
@@ -759,7 +809,7 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
       "atp-500": "ATP 500", "atp-250": "ATP 250", "atp-finals": "ATP Finals", "other": "otro",
     };
     const lvlLabel = LEVEL_LABELS[lvl] ?? lvl;
-    const favored = rawAdv > 0.05 ? input.player1Name.split(" ").pop()! : rawAdv < -0.05 ? input.player2Name.split(" ").pop()! : null;
+    const favored = rawAdv > 0.05 ? playerLastName(input.player1Name) : rawAdv < -0.05 ? playerLastName(input.player2Name) : null;
     const explanation = favored
       ? `${favored} rinde mejor en ${lvlLabel} (${pctStr(rawAdv > 0 ? p1Rate : p2Rate)})`
       : `rendimiento similar en torneos ${lvlLabel}`;
@@ -787,7 +837,7 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
     const hasData = todKey != null && (p1M >= MIN_MATCHES_FACTOR || p2M >= MIN_MATCHES_FACTOR);
     const rawAdv = rateToAdv(p1Rate, p2Rate);
     const todLabel = todKey === "night" ? "nocturno" : todKey === "evening" ? "vespertino" : todKey === "day" ? "diurno" : "sin turno especificado";
-    const favored = rawAdv > 0.05 ? input.player1Name.split(" ").pop()! : rawAdv < -0.05 ? input.player2Name.split(" ").pop()! : null;
+    const favored = rawAdv > 0.05 ? playerLastName(input.player1Name) : rawAdv < -0.05 ? playerLastName(input.player2Name) : null;
     const explanation = favored
       ? `${favored} tiene mejor rendimiento en turno ${todLabel} (${pctStr(rawAdv > 0 ? p1Rate : p2Rate)})`
       : todKey ? `rendimiento similar en turno ${todLabel}` : "turno no especificado";
@@ -824,7 +874,7 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
     if (weather.temp < 12)      wxEffects.push(`frío ${weather.temp.toFixed(0)}°C`);
     const conditions = wxEffects.join(", ") || "condiciones normales";
     const hasData = Math.abs(wxNetAdv) >= 0.05;
-    const favored = wxNetAdv > 0.05 ? input.player1Name.split(" ").pop()! : wxNetAdv < -0.05 ? input.player2Name.split(" ").pop()! : null;
+    const favored = wxNetAdv > 0.05 ? playerLastName(input.player1Name) : wxNetAdv < -0.05 ? playerLastName(input.player2Name) : null;
     const explanation = favored
       ? `estilo ${style1 === (wxNetAdv > 0 ? style1 : style2) && wxNetAdv > 0 ? style1 : style2} de ${favored} favorecido por ${conditions}`
       : `condiciones climáticas neutras para ambos estilos`;
@@ -859,7 +909,7 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
     const p2TbM = tb2?.played ?? 0;
     const hasData = (p1TbM >= MIN_MATCHES_FACTOR || p2TbM >= MIN_MATCHES_FACTOR);
     const rawAdv = rateToAdv(p1Combined, p2Combined);
-    const favored = rawAdv > 0.05 ? input.player1Name.split(" ").pop()! : rawAdv < -0.05 ? input.player2Name.split(" ").pop()! : null;
+    const favored = rawAdv > 0.05 ? playerLastName(input.player1Name) : rawAdv < -0.05 ? playerLastName(input.player2Name) : null;
     const explanation = favored
       ? `${favored} más fiable en tiebreaks y sets decisivos (${pctStr(rawAdv > 0 ? p1Combined : p2Combined)} combinado)`
       : `rendimiento similar en situaciones de presión`;
@@ -884,7 +934,7 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
     const s2 = restDaysScore(daysRest2);
     const rawAdv = clamp((s1 - s2) * 2, -1, 1);
     const formatRest = (d: number | null) => d == null ? "sin datos" : d === 0 ? "jugó hoy" : `${d}d descanso`;
-    const favored = rawAdv > 0.05 ? input.player1Name.split(" ").pop()! : rawAdv < -0.05 ? input.player2Name.split(" ").pop()! : null;
+    const favored = rawAdv > 0.05 ? playerLastName(input.player1Name) : rawAdv < -0.05 ? playerLastName(input.player2Name) : null;
     const explanation = favored
       ? `${favored} llega más descansado (${formatRest(rawAdv > 0 ? daysRest1 : daysRest2)} vs ${formatRest(rawAdv > 0 ? daysRest2 : daysRest1)})`
       : `descanso similar para ambos jugadores`;
@@ -894,6 +944,25 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
       p1LastMatch ? `${formatRest(daysRest1)} (últ. ${p1LastMatch})` : "sin datos",
       p2LastMatch ? `${formatRest(daysRest2)} (últ. ${p2LastMatch})` : "sin datos",
       rawAdv, hasData ? 0.80 : 0.10,
+      hasData, 0, explanation,
+    ));
+  })();
+
+  // ─── Factor 11: Perfil táctico del matchup (8%) ──────────
+  (() => {
+    const score = matchupEarly.tacticalEdgeScore; // -10 a +10 desde perspectiva P1
+    const rawAdv = clamp(score / 10, -1, 1);
+    const hasData = Math.abs(score) >= 0.5; // solo contar si hay ventaja apreciable
+    const favored = rawAdv > 0.05 ? playerLastName(input.player1Name) : rawAdv < -0.05 ? playerLastName(input.player2Name) : null;
+    const explanation = favored
+      ? `ventaja táctica de ${favored} por perfil de juego, armas y adaptación a la superficie`
+      : `matchup tácticamente equilibrado`;
+    rawFactors.push(makeFactorResult(
+      "tactical_profile", "Perfil táctico del matchup",
+      `score táctico P1: ${score >= 0 ? "+" : ""}${score.toFixed(1)}`,
+      `score táctico P2: ${score <= 0 ? "+" : ""}${(-score).toFixed(1)}`,
+      rawAdv,
+      hasData ? 0.70 : 0.20,
       hasData, 0, explanation,
     ));
   })();
@@ -984,39 +1053,81 @@ export async function predict(input: PredictionInput): Promise<PredictionResult>
   // ── 12. Razón principal ────────────────────────────────────
   const mainReason = buildMainReason(allFactors, input.player1Name, input.player2Name, winPct1);
 
-  // ── 13. Análisis táctico experto ─────────────────────────
-  const matchup = analyzeMatchup(p1, p2, pat1, pat2, {
-    surface: input.surface,
-    tourneyLevel: input.tourneyLevel,
-    tournament: input.tournament,
-    weather: weather ? { temp: weather.temp, windSpeed: weather.windSpeed, humidity: weather.humidity, effect: weather.effect } : undefined,
-    p1RankEstimated,
-    p2RankEstimated,
-    isIndoor: input.indoor,
-  });
+  // ── 13. Reusar matchup calculado en 5c ────────────────────
+  const matchup = matchupEarly;
 
   const topFactor = allFactors
     .filter((f) => f.hasData && f.effectiveWeight > 0)
     .sort((a, b) => (b.magnitude * b.effectiveWeight) - (a.magnitude * a.effectiveWeight))[0];
 
-  const tacticalAnalysis = generateNarrative({
-    p1Name: input.player1Name,
-    p2Name: input.player2Name,
-    p1Slug: p1,
-    p2Slug: p2,
-    tournament: input.tournament,
-    tourneyLevel: input.tourneyLevel,
-    surface: input.surface,
-    winPct1,
-    winPct2,
-    recentForm1: form1,
-    recentForm2: form2,
-    h2h,
-    p1Patterns: pat1,
-    p2Patterns: pat2,
-    matchup,
-    mainFactor: topFactor?.id,
-  });
+  // ── 13b. Datos específicos para narración completa ────────
+  const todKey = (input.timeOfDay === "night" || input.timeOfDay === "evening" || input.timeOfDay === "day")
+    ? input.timeOfDay as "day" | "evening" | "night"
+    : null;
+
+  const p1TimeOfDaySplit = todKey ? pat1?.timeOfDaySplits?.[todKey] ?? null : null;
+  const p2TimeOfDaySplit = todKey ? pat2?.timeOfDaySplits?.[todKey] ?? null : null;
+
+  const p1CourtData = pat1?.courtStats?.[input.tournament];
+  const p2CourtData = pat2?.courtStats?.[input.tournament];
+  const p1TourneyHistoryData = (p1CourtData?.split)
+    ? { winRate: p1CourtData.split.winRate ?? null, matches: p1CourtData.split.matches ?? 0 }
+    : null;
+  const p2TourneyHistoryData = (p2CourtData?.split)
+    ? { winRate: p2CourtData.split.winRate ?? null, matches: p2CourtData.split.matches ?? 0 }
+    : null;
+
+  const p1Streak = computeCurrentStreak(pat1?.recentForm);
+  const p2Streak = computeCurrentStreak(pat2?.recentForm);
+
+  let p1Insights: ReturnType<typeof getPlayerInsights> | null = null;
+  let p2Insights: ReturnType<typeof getPlayerInsights> | null = null;
+  try {
+    p1Insights = getPlayerInsights(p1);
+    p2Insights = getPlayerInsights(p2);
+  } catch { /* insights no disponibles */ }
+
+  let tacticalAnalysis: TacticalAnalysis | undefined;
+  try {
+    tacticalAnalysis = generateNarrative({
+      p1Name: input.player1Name,
+      p2Name: input.player2Name,
+      p1Slug: p1,
+      p2Slug: p2,
+      tournament: input.tournament,
+      tourneyLevel: input.tourneyLevel,
+      surface: input.surface,
+      round: input.round,
+      timeOfDay: input.timeOfDay,
+      isIndoor: input.indoor,
+      courtSpeed: courtSpeed,
+      courtProfile: csiProfile,
+      weather: weather ? { temp: weather.temp, windSpeed: weather.windSpeed, humidity: weather.humidity, effect: weather.effect } : undefined,
+      winPct1,
+      winPct2,
+      p1Rank: p1RankEstimated,
+      p2Rank: p2RankEstimated,
+      recentForm1: form1,
+      recentForm2: form2,
+      p1Streak,
+      p2Streak,
+      daysRest1,
+      daysRest2,
+      h2h,
+      p1TimeOfDaySplit: p1TimeOfDaySplit ? { winRate: p1TimeOfDaySplit.winRate, matches: p1TimeOfDaySplit.matches } : null,
+      p2TimeOfDaySplit: p2TimeOfDaySplit ? { winRate: p2TimeOfDaySplit.winRate, matches: p2TimeOfDaySplit.matches } : null,
+      p1TourneyHistory: p1TourneyHistoryData,
+      p2TourneyHistory: p2TourneyHistoryData,
+      p1Patterns: pat1,
+      p2Patterns: pat2,
+      matchup,
+      mainFactor: topFactor?.id,
+      p1AccumulatedInsights: (p1Insights && p1Insights.matchCount > 0) ? p1Insights : null,
+      p2AccumulatedInsights: (p2Insights && p2Insights.matchCount > 0) ? p2Insights : null,
+    });
+  } catch (e) {
+    console.error("[engine] generateNarrative error:", (e as Error).message);
+  }
 
   return {
     player1: { slug: p1, name: input.player1Name, winPct: winPct1 },

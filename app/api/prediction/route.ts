@@ -19,6 +19,7 @@ export async function POST(req: NextRequest) {
       tournament: body.tournament,
       tourneyLevel: body.tourneyLevel ?? "atp-250",
       surface: body.surface ?? "hard",
+      round: body.round,
       timeOfDay: body.timeOfDay,
       date: body.date ?? new Date().toISOString().slice(0, 10),
       lat: body.lat,
@@ -39,7 +40,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(result);
   } catch (err) {
-    console.error("[prediction/route]", err);
-    return NextResponse.json({ error: "Error interno al calcular predicción" }, { status: 500 });
+    const e = err as Error;
+    console.error("[prediction/route] ERROR:", e.message);
+    console.error("[prediction/route] STACK:", e.stack?.slice(0, 800));
+    return NextResponse.json({ error: "Error interno al calcular predicción", detail: e.message }, { status: 500 });
   }
 }

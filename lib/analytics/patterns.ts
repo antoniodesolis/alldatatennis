@@ -157,15 +157,22 @@ function computeFromRows(rows: MatchStatRow[], teSlug: string, surface: string, 
    * Los datos vienen de dos fuentes con columnas distintas:
    *   sackmann_csv  → result, surface, aces, serve stats, opponent_rank, tourney_level, score, etc.
    *   charting_csv  → winners, unforced_errors  (result y surface son NULL)
+   *   te_history    → result, surface, score, sets_played, tb_played (sin round ni BP)
    *
-   * Separamos en tres ventanas para no mezclar nulls:
-   *   resultRows  → filas con result != null  → win rate, splits por superficie/ronda/nivel/etc.
-   *   serveRows   → filas con first_in != null → estadísticas de servicio
-   *   shotRows    → filas con winners != null  → winners / unforced
+   * Tres ventanas con políticas distintas:
+   *   resultRows  → filas con result != null, limitado a windowN (forma reciente)
+   *   serveRows   → filas con datos de saque/BP (sackmann), SIN límite de ventana
+   *                 ya que te_history no tiene estos datos — limitar ocultaría stats válidas
+   *   shotRows    → filas con winners != null (charting), SIN límite
+   *
+   * roundSplits y tbStats también usan TODO el dataset (no solo resultRows recientes)
+   * porque te_history no tiene round ni BP, y los datos sackmann son anteriores.
    */
-  const resultRows = rows.filter((r) => r.result !== null).slice(0, windowN);
-  const serveRows  = rows.filter((r) => r.first_in !== null || r.aces !== null).slice(0, windowN);
-  const shotRows   = rows.filter((r) => r.winners !== null).slice(0, windowN);
+  const resultRows    = rows.filter((r) => r.result !== null).slice(0, windowN);
+  const serveRows     = rows.filter((r) => r.first_in !== null || r.aces !== null);
+  const shotRows      = rows.filter((r) => r.winners !== null);
+  // Para ronda y tiebreaks: todos los rows con resultado real (sin recortar a windowN)
+  const allResultRows = rows.filter((r) => r.result !== null);
 
   const wins   = resultRows.filter((r) => r.result === "W").length;
   const losses = resultRows.filter((r) => r.result === "L").length;
@@ -232,11 +239,15 @@ function computeFromRows(rows: MatchStatRow[], teSlug: string, surface: string, 
   };
 
   // ── Round splits ──────────────────────────────────────────
+  // Usa allResultRows (histórico completo) porque te_history no tiene round.
+  // Excluye qualifying (Q, Q1, Q2) del split — se registran pero no distorsionan el análisis.
+  const QUALIFYING_ROUNDS = new Set(["Q", "Q1", "Q2", "QUAL", "QUALIFYING"]);
   const roundOrder = ["R128", "R64", "R32", "R16", "QF", "SF", "F", "RR", "BR"];
   const byRound: Record<string, MatchStatRow[]> = {};
-  for (const r of resultRows) {
+  for (const r of allResultRows) {
     const rnd = r.round ?? "unknown";
     if (rnd === "unknown") continue;
+    if (QUALIFYING_ROUNDS.has(rnd.toUpperCase())) continue;   // skip qualifying
     if (!byRound[rnd]) byRound[rnd] = [];
     byRound[rnd].push(r);
   }
@@ -264,8 +275,10 @@ function computeFromRows(rows: MatchStatRow[], teSlug: string, surface: string, 
   const indoorSplits = { indoor: winRateSplit(indoorRows), outdoor: winRateSplit(outdoorRows) };
 
   // ── Tiebreak stats ────────────────────────────────────────
+  // Usa allResultRows: sackmann tiene datos ricos; te_history solo tiene 0s (straight sets)
+  // en su mayoría, pero aun así es más completo que los windowN recientes sin datos.
   let tbPlayed = 0, tbWon = 0;
-  for (const r of resultRows) {
+  for (const r of allResultRows) {
     if (r.tb_played != null) tbPlayed += r.tb_played;
     if (r.tb_won   != null) tbWon   += r.tb_won;
   }
@@ -276,8 +289,9 @@ function computeFromRows(rows: MatchStatRow[], teSlug: string, surface: string, 
   };
 
   // ── 3rd / 5th set stats ───────────────────────────────────
-  const bestOf3Rows = resultRows.filter((r) => r.best_of === 3);
-  const bestOf5Rows = resultRows.filter((r) => r.best_of === 5);
+  // Usa allResultRows para capturar más sets decisivos del histórico
+  const bestOf3Rows = allResultRows.filter((r) => r.best_of === 3);
+  const bestOf5Rows = allResultRows.filter((r) => r.best_of === 5);
 
   const thirdSetRows = bestOf3Rows.filter((r) => r.sets_played === 3);
   const fifthSetRows = bestOf5Rows.filter((r) => r.sets_played != null && r.sets_played >= 4);
@@ -359,8 +373,8 @@ function computeFromRows(rows: MatchStatRow[], teSlug: string, surface: string, 
 
   // ── BP conversion as returner ─────────────────────────────
   const bpConversionPct = pct(
-    resultRows.map((r) => r.bp_converted),
-    resultRows.map((r) => r.bp_opportunities)
+    allResultRows.map((r) => r.bp_converted),
+    allResultRows.map((r) => r.bp_opportunities)
   );
 
   // ── Avg duration ─────────────────────────────────────────

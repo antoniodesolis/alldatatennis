@@ -157,10 +157,25 @@ export const SLUG_CANONICAL: Record<string, string> = {
 
 /**
  * Resolves any slug (including TE aliases) to its canonical form.
- * If no mapping exists, returns the slug unchanged.
+ *
+ * Resolution order:
+ *   1. Explicit SLUG_CANONICAL map (manual overrides)
+ *   2. Strip TE hash suffix: "griekspoor-d58ed" → "griekspoor"
+ *      Pattern: slug ends with "-" followed by exactly 5 hex chars
+ *   3. Return unchanged
  */
 export function canonicalSlug(slug: string): string {
-  return SLUG_CANONICAL[slug] ?? slug;
+  if (!slug) return slug;
+  // 1. Explicit map
+  if (SLUG_CANONICAL[slug]) return SLUG_CANONICAL[slug];
+  // 2. Strip TE hash suffix (e.g. "-d58ed", "-f7ddc")
+  const hashSuffixRe = /-[0-9a-f]{5}$/i;
+  if (hashSuffixRe.test(slug)) {
+    const base = slug.replace(hashSuffixRe, "");
+    // Also apply explicit map to the base slug
+    return SLUG_CANONICAL[base] ?? base;
+  }
+  return slug;
 }
 
 // Índice inverso: atpCode → te_slug (primera aparición)

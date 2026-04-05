@@ -287,6 +287,131 @@ export function updateMatchCourtSpeed(tourneyName: string, courtSpeed: number) {
   ).run(courtSpeed, tourneyName);
 }
 
+// ── Match insights ─────────────────────────────────────────
+
+export interface MatchInsightRow {
+  te_match_id:   string;
+  match_date:    string;
+  winner_slug:   string;
+  loser_slug:    string;
+  tournament:    string | null;
+  surface:       string | null;
+  score:         string | null;
+  match_pattern: string | null;
+  chronicle_url: string | null;
+  chronicle_src: string | null;
+  insights_json: string | null;
+  enriched_at:   number | null;
+}
+
+export function upsertMatchInsight(row: MatchInsightRow) {
+  getDb().prepare(`
+    INSERT INTO match_insights
+      (te_match_id, match_date, winner_slug, loser_slug, tournament, surface, score,
+       match_pattern, chronicle_url, chronicle_src, insights_json, enriched_at)
+    VALUES
+      (@te_match_id, @match_date, @winner_slug, @loser_slug, @tournament, @surface, @score,
+       @match_pattern, @chronicle_url, @chronicle_src, @insights_json, @enriched_at)
+    ON CONFLICT(te_match_id) DO UPDATE SET
+      match_pattern  = COALESCE(excluded.match_pattern, match_pattern),
+      chronicle_url  = COALESCE(excluded.chronicle_url, chronicle_url),
+      chronicle_src  = COALESCE(excluded.chronicle_src, chronicle_src),
+      insights_json  = COALESCE(excluded.insights_json, insights_json),
+      enriched_at    = excluded.enriched_at
+  `).run(row);
+}
+
+export function getMatchInsight(teMatchId: string): MatchInsightRow | undefined {
+  return getDb().prepare(
+    "SELECT * FROM match_insights WHERE te_match_id = ?"
+  ).get(teMatchId) as MatchInsightRow | undefined;
+}
+
+export function getMatchesNeedingEnrichment(since: string, limit = 50): MatchInsightRow[] {
+  // Partidos en player_match_stats (result=W) que no tienen insight o no tienen insights_json
+  const db = getDb();
+  return db.prepare(`
+    SELECT DISTINCT
+      pms.te_match_id,
+      pms.match_date,
+      pms.te_slug          AS winner_slug,
+      pms.opponent_slug    AS loser_slug,
+      pms.tournament,
+      pms.surface,
+      pms.score,
+      mi.match_pattern,
+      mi.chronicle_url,
+      mi.chronicle_src,
+      mi.insights_json,
+      mi.enriched_at
+    FROM player_match_stats pms
+    LEFT JOIN match_insights mi ON mi.te_match_id = pms.te_match_id
+    WHERE pms.result = 'W'
+      AND pms.match_date >= ?
+      AND pms.score IS NOT NULL
+      AND (mi.te_match_id IS NULL OR mi.insights_json IS NULL)
+    ORDER BY pms.match_date DESC
+    LIMIT ?
+  `).all(since, limit) as MatchInsightRow[];
+}
+
+// ── Player insights ────────────────────────────────────────
+
+export interface PlayerInsightRow {
+  te_slug:      string;
+  insights_json: string;
+  match_count:  number;
+  updated_at:   number;
+}
+
+export interface AccumulatedInsights {
+  matchPatterns:        { dominio: number; batalla: number; irregular: number; remontada: number; walkover: number };
+  tacticalObservations: string[];   // últimas 20 observaciones acumuladas
+  weaponsConfirmed:     string[];   // armas mencionadas con frecuencia
+  weaknessesConfirmed:  string[];   // debilidades mencionadas
+  mentalObservations:   string[];   // notas mentales
+  surfaceNotes:         Record<string, string[]>;  // notas por superficie
+  lastUpdated:          string;
+  matchCount:           number;
+}
+
+function emptyAccumulated(): AccumulatedInsights {
+  return {
+    matchPatterns: { dominio: 0, batalla: 0, irregular: 0, remontada: 0, walkover: 0 },
+    tacticalObservations: [],
+    weaponsConfirmed: [],
+    weaknessesConfirmed: [],
+    mentalObservations: [],
+    surfaceNotes: {},
+    lastUpdated: new Date().toISOString().slice(0, 10),
+    matchCount: 0,
+  };
+}
+
+export function getPlayerInsights(teSlug: string): AccumulatedInsights {
+  const row = getDb().prepare(
+    "SELECT insights_json FROM player_insights WHERE te_slug = ?"
+  ).get(teSlug) as { insights_json: string } | undefined;
+
+  if (!row) return emptyAccumulated();
+  try {
+    return JSON.parse(row.insights_json) as AccumulatedInsights;
+  } catch {
+    return emptyAccumulated();
+  }
+}
+
+export function savePlayerInsights(teSlug: string, insights: AccumulatedInsights) {
+  getDb().prepare(`
+    INSERT INTO player_insights (te_slug, insights_json, match_count, updated_at)
+    VALUES (?, ?, ?, unixepoch())
+    ON CONFLICT(te_slug) DO UPDATE SET
+      insights_json = excluded.insights_json,
+      match_count   = excluded.match_count,
+      updated_at    = excluded.updated_at
+  `).run(teSlug, JSON.stringify(insights), insights.matchCount);
+}
+
 // ── Stats summary ──────────────────────────────────────────
 
 export function getDbStats(): { players: number; matches: number; processed: number } {

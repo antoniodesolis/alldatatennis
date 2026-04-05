@@ -126,9 +126,14 @@ const STATIC_TOP100: ATPPlayer[] = [
   { rank:100,name:"Cristian Garin",               country: FLAGS.chi, atpCode:"gd64", photo:"https://www.atptour.com/-/media/alias/player-headshot/gd64", points:"" },
 ];
 
-// Caché en memoria — intentar scraping en vivo 1 vez por hora
+import { runMigrations } from "../../../lib/db/schema";
+import { getDb } from "../../../lib/db/client";
+
+// Caché en memoria — 1 hora
 let cache: { players: ATPPlayer[]; ts: number; source: string } | null = null;
 const CACHE_MS = 60 * 60 * 1000;
+// Rankings en DB considerados válidos si tienen < 8 días
+const DB_MAX_AGE_S = 8 * 24 * 60 * 60;
 
 function lastMonday(): string {
   const d = new Date();
@@ -138,19 +143,17 @@ function lastMonday(): string {
   return d.toISOString().slice(0, 10);
 }
 
-function parseRankings(html: string): ATPPlayer[] {
-  // Extrae pares flag-xxx / /en/players/slug/code/overview en orden de aparición
+export function parseRankings(html: string): ATPPlayer[] {
   const tokens = [...html.matchAll(/flag-([a-z]+)|\/en\/players\/[^/]+\/([a-z0-9]+)\/overview/g)];
   const players: ATPPlayer[] = [];
   let pendingFlag = "";
 
   for (const t of tokens) {
     if (t[1]) {
-      pendingFlag = t[1]; // flag code
+      pendingFlag = t[1];
     } else if (t[2]) {
       const atpCode = t[2];
-      if (players.some((p) => p.atpCode === atpCode)) continue; // deduplicar
-      // Extraer nombre del jugador desde contexto del link
+      if (players.some((p) => p.atpCode === atpCode)) continue;
       const idx = t.index ?? 0;
       const before = html.slice(Math.max(0, idx - 300), idx + 300);
       const nameMatch = before.match(/class="lastName">([^<]+)<\/span>/);
@@ -172,41 +175,108 @@ function parseRankings(html: string): ATPPlayer[] {
   return players;
 }
 
-export async function GET() {
-  if (cache && Date.now() - cache.ts < CACHE_MS) {
-    return Response.json({ players: cache.players, source: cache.source });
+/** Guarda rankings en DB (reemplaza todos los del timestamp actual) */
+export function saveRankingsToDB(players: ATPPlayer[]): void {
+  try {
+    runMigrations();
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    // Borrar rankings con el mismo segundo (por si se llama dos veces) y los de hace > 30 días
+    db.exec(`DELETE FROM atp_rankings WHERE updated_at <= ${now - 30 * 24 * 3600}`);
+    const insert = db.prepare(
+      `INSERT OR REPLACE INTO atp_rankings (rank, atp_code, name, country, points, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    );
+    const insertMany = db.transaction((rows: ATPPlayer[]) => {
+      for (const p of rows) insert.run(p.rank, p.atpCode, p.name, p.country, p.points, now);
+    });
+    insertMany(players);
+    console.log(`[rankings] ${players.length} rankings guardados en DB (ts=${now})`);
+  } catch (e) {
+    console.warn("[rankings] Error guardando en DB:", (e as Error).message);
   }
+}
 
+/** Lee los rankings más recientes de la DB */
+export function loadRankingsFromDB(): { players: ATPPlayer[]; updatedAt: number } | null {
+  try {
+    runMigrations();
+    const db = getDb();
+    const latest = db.prepare(
+      `SELECT MAX(updated_at) as ts FROM atp_rankings`
+    ).get() as { ts: number | null };
+    if (!latest?.ts) return null;
+
+    const rows = db.prepare(
+      `SELECT rank, atp_code, name, country, points FROM atp_rankings
+       WHERE updated_at = ? ORDER BY rank ASC`
+    ).all(latest.ts) as Array<{ rank: number; atp_code: string; name: string; country: string; points: string }>;
+
+    if (rows.length < 20) return null;
+    const players: ATPPlayer[] = rows.map((r) => ({
+      rank: r.rank,
+      name: r.name,
+      country: r.country,
+      atpCode: r.atp_code,
+      photo: `https://www.atptour.com/-/media/alias/player-headshot/${r.atp_code}`,
+      points: r.points ?? "",
+    }));
+    return { players, updatedAt: latest.ts };
+  } catch {
+    return null;
+  }
+}
+
+export async function scrapeRankings(): Promise<ATPPlayer[] | null> {
   const rankDate = lastMonday();
   const url = `https://www.atptour.com/en/rankings/singles?rankDate=${rankDate}&rankRange=1-100`;
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+      Referer: "https://www.google.com/",
+      "Cache-Control": "no-cache",
+    },
+    signal: AbortSignal.timeout(12_000),
+  });
+  if (!res.ok) throw new Error(`ATP HTTP ${res.status}`);
+  const html = await res.text();
+  const players = parseRankings(html);
+  if (players.length < 20) throw new Error(`Solo ${players.length} jugadores parseados`);
+  return players;
+}
 
-  try {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        Accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        Referer: "https://www.google.com/",
-        "Cache-Control": "no-cache",
-      },
-      signal: AbortSignal.timeout(12_000),
-    });
-
-    if (!res.ok) throw new Error(`ATP HTTP ${res.status}`);
-
-    const html = await res.text();
-    const players = parseRankings(html);
-
-    if (players.length >= 20) {
-      cache = { players, ts: Date.now(), source: "live" };
-      return Response.json({ players, source: "live" });
-    }
-    throw new Error(`Solo ${players.length} jugadores parseados`);
-  } catch (err) {
-    console.warn("[rankings] Usando datos estáticos:", (err as Error).message);
-    cache = { players: STATIC_TOP100, ts: Date.now(), source: "static" };
-    return Response.json({ players: STATIC_TOP100, source: "static" });
+export async function GET() {
+  // 1. Caché en memoria
+  if (cache && Date.now() - cache.ts < CACHE_MS) {
+    return Response.json({ players: cache.players, source: cache.source, updatedAt: Math.floor(cache.ts / 1000) });
   }
+
+  // 2. Intentar scraping en vivo
+  try {
+    const players = await scrapeRankings();
+    if (players) {
+      saveRankingsToDB(players);
+      cache = { players, ts: Date.now(), source: "live" };
+      return Response.json({ players, source: "live", updatedAt: Math.floor(Date.now() / 1000) });
+    }
+  } catch (err) {
+    console.warn("[rankings] Scraping fallido:", (err as Error).message);
+  }
+
+  // 3. Rankings persistidos en DB
+  const dbData = loadRankingsFromDB();
+  if (dbData) {
+    const ageS = Math.floor(Date.now() / 1000) - dbData.updatedAt;
+    if (ageS < DB_MAX_AGE_S) {
+      cache = { players: dbData.players, ts: Date.now(), source: "db" };
+      return Response.json({ players: dbData.players, source: "db", updatedAt: dbData.updatedAt });
+    }
+  }
+
+  // 4. Fallback estático
+  console.warn("[rankings] Usando datos estáticos");
+  cache = { players: STATIC_TOP100, ts: Date.now(), source: "static" };
+  return Response.json({ players: STATIC_TOP100, source: "static", updatedAt: 0 });
 }

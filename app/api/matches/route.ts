@@ -284,16 +284,24 @@ function parseResultsPage(html: string): ATPMatch[] {
 
 async function enrichMatches(matches: ATPMatch[]): Promise<ATPMatch[]> {
   const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36";
-  const tournamentsToFetch = [...new Set(
-    matches.filter(m => !m.surface).map(m => m.id).slice(0, 5)
-  )];
+  // Fetch one match per tournament to get round+surface.
+  // Priority: matches without surface OR without round.
+  const seenTournaments = new Set<string>();
+  const toFetch: string[] = [];
+  for (const m of matches) {
+    if (!seenTournaments.has(m.tournamentSlug) && (!m.surface || !m.round)) {
+      seenTournaments.add(m.tournamentSlug);
+      toFetch.push(m.id);
+      if (toFetch.length >= 8) break;
+    }
+  }
 
   await Promise.all(
-    tournamentsToFetch.map(async (id) => {
+    toFetch.map(async (id) => {
       try {
         const res = await fetch(`https://www.tennisexplorer.com/match-detail/?id=${id}`, {
           headers: { "User-Agent": UA },
-          signal: AbortSignal.timeout(5000),
+          signal: AbortSignal.timeout(6000),
         });
         if (!res.ok) return;
         const html = await res.text();
@@ -303,9 +311,11 @@ async function enrichMatches(matches: ATPMatch[]): Promise<ATPMatch[]> {
         const surface = infoMatch[2].trim().toLowerCase();
         const match = matches.find(m => m.id === id);
         if (!match) return;
+        // Propagate round+surface to ALL matches of the same tournament
         for (const m of matches) {
           if (m.tournamentSlug === match.tournamentSlug) {
             if (!m.surface) m.surface = surface;
+            // Each match may have its own round — only set if not already known
             if (!m.round) m.round = round;
           }
         }
