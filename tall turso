@@ -1,0 +1,20 @@
+[33m5bf8650[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m feat(scripts): Task Scheduler para daily-sync automatico a las 06:00
+[33m80a0f00[m fix(daily-sync): resolver predicciones por fecha+slug en vez de match_id
+[33m1d18590[m refactor(narrative): reducir repetición en análisis narrativos
+[33mca89778[m fix(historico): filtrar marzo y challengers del histórico
+[33m8d436ce[m feat: prediction engine, narrative, rankings, admin panel y histórico
+[33m088f543[m feat: inteligencia táctica experta ATP (8 capas de conocimiento)
+[33mc48e74a[m feat: calendario semanal de partidos + score + comparación de predicción
+[33mb5654cf[m feat: sistema de confianza estadística por jugador
+[33md59e13c[m feat: motor de predicción v2 + retroalimentación automática diaria
+[33m9ae5ec3[m feat: modelo de pista por torneo (Court Speed Index 0-100)
+[33m68a3560[m fix: patrones muestran datos correctos — separar filas por fuente de datos
+[33m7463e9a[m feat: prioridad temporal — últimos 24 meses primero en cálculo de patrones
+[33mb4f4e0c[m feat: estadísticas completas por jugador con tabs — Sackmann CSV 2023/2024
+[33m2805b48[m feat: patrones contextuales — duración, hora del día y estilo de rival
+[33mb3565a7[m feat: sistema de estadísticas acumuladas por jugador con SQLite
+[33m797c8a9[m feat: partidos ATP del día con fotos y fichas de jugadores
+[33mc938523[m feat: ranking ATP en vivo con fotos reales
+[33m9a984a7[m feat: home inicial AllDataTennis
+[33m58c19d9[m feat: home inicial AllDataTennis
+[33mabdd880[m Initial commit

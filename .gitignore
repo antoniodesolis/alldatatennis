@@ -43,3 +43,5 @@ next-env.d.ts
 data/tennis.db
 data/tennis.db-wal
 data/tennis.db-shm
+
+.vercel
