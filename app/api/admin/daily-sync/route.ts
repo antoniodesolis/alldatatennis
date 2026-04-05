@@ -17,7 +17,7 @@ import { backfillOpponentStyles, reclassifyAllStyles } from "@/lib/learning/styl
 import { getPlayerPatterns, resetPatterns } from "@/lib/analytics/patterns";
 import { analyzeMatch } from "@/lib/analytics/match-patterns";
 import { refreshMomentumProfile } from "@/lib/analytics/momentum-patterns";
-import { refreshTournamentStats } from "@/lib/analytics/tournament-stats";
+import { refreshTournamentStats, initTournamentEdition } from "@/lib/analytics/tournament-stats";
 
 // ── ATP_RANK (top-100 atpCode → rank) ─────────────────────
 const ATP_RANK: Record<string, number> = {
@@ -372,6 +372,39 @@ async function generateDayInsights(date: string): Promise<{ generated: number; s
   return { generated, skipped };
 }
 
+/**
+ * Detecta torneos nuevos en los partidos del día (incluyendo programados)
+ * y crea un registro mínimo en tournament_edition_stats para que la página
+ * del torneo funcione desde el primer día, aunque aún no haya partidos finalizados.
+ */
+async function initNewTournamentsForDate(date: string): Promise<{ initialized: string[] }> {
+  const db = getDb();
+  const year = parseInt(date.slice(0, 4));
+
+  // Todos los torneos que aparecen en partidos de ese día (finalizados o no)
+  const result = await db.execute({
+    sql: `
+      SELECT DISTINCT tournament, surface FROM player_match_stats
+      WHERE match_date = ? AND tournament IS NOT NULL
+      GROUP BY tournament
+    `,
+    args: [date],
+  });
+
+  const rows = result.rows as unknown as { tournament: string; surface: string | null }[];
+  const initialized: string[] = [];
+
+  for (const row of rows) {
+    try {
+      await initTournamentEdition(row.tournament, row.surface, year);
+      initialized.push(row.tournament);
+    } catch {
+      // ignorar errores individuales
+    }
+  }
+  return { initialized };
+}
+
 async function refreshTournamentsForDate(date: string): Promise<{ refreshed: string[] }> {
   const db = getDb();
   const year = parseInt(date.slice(0, 4));
@@ -454,6 +487,14 @@ export async function POST(req: NextRequest) {
     };
   } catch (err) {
     result.ingest = { error: (err as Error).message };
+  }
+
+  // ── Paso 1b: Inicializar torneos nuevos ──────────────────
+  try {
+    const initResult = await initNewTournamentsForDate(targetDate);
+    result.tournamentInit = initResult;
+  } catch (err) {
+    result.tournamentInit = { error: (err as Error).message };
   }
 
   // ── Paso 2: Normalizar slugs ─────────────────────────────

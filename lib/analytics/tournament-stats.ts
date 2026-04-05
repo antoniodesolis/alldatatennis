@@ -420,8 +420,31 @@ export async function refreshTournamentStats(
 ): Promise<TournamentEditionStats> {
   const targetYear = year ?? new Date().getFullYear();
   const stats = await aggregateTournamentEditionStats(tourneyName, targetYear);
-  if (stats.matchesAnalyzed >= 2) {
-    await saveTournamentEditionStats(stats);
-  }
+  // Guardar siempre — incluso con 0 partidos, para registrar el slug en la tabla
+  await saveTournamentEditionStats(stats);
   return stats;
+}
+
+/**
+ * Inicializa una edición de torneo con datos mínimos (sin sobrescribir si ya existe).
+ * Se llama al inicio del torneo, cuando aún no hay partidos terminados.
+ */
+export async function initTournamentEdition(
+  tourneyName: string,
+  surface: string | null,
+  year?: number,
+): Promise<void> {
+  const db = getDb();
+  const targetYear = year ?? new Date().getFullYear();
+  const slug = slugifyTourney(tourneyName);
+  // INSERT OR IGNORE — no sobreescribir si ya tiene datos
+  await db.execute({
+    sql: `
+      INSERT OR IGNORE INTO tournament_edition_stats
+        (tourney_name, year, tourney_slug, surface, matches_analyzed,
+         pattern_json, style_wins_json, surface_reading, updated_at)
+      VALUES (?, ?, ?, ?, 0, '{}', '{}', '', unixepoch())
+    `,
+    args: [tourneyName, targetYear, slug, surface],
+  });
 }
